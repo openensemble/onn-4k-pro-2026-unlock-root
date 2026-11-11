@@ -1,0 +1,45 @@
+#!/system/bin/sh
+# Manual invocation only. No startup registration, reboot, restore, or retry.
+set -eu
+umask 077
+fail() { echo "STOP: $*" >&2; exit 1; }
+onn26_file_sha256() { sha256sum "$1" | cut -d ' ' -f 1; }
+[ "$#" = 1 ] || fail 'explicit --check-only or --write-once required'
+case "$1" in --check-only|--write-once) ;; *) fail 'unknown action';; esac
+[ "$(id -u)" = 0 ] || fail 'root required'
+[ "$(getprop ro.serialno)" = @@SERIAL@@ ] || fail 'physical unit mismatch'
+[ "$(getprop ro.build.fingerprint)" = @@FINGERPRINT@@ ] || fail 'firmware mismatch'
+[ "$(getprop ro.bootloader)" = @@BOOTLOADER@@ ] || fail 'bootloader mismatch'
+[ "$(getprop ro.boot.slot_suffix)" = _b ] || fail 'slot mismatch'
+[ "$(getprop ro.boot.flash.locked)" = 0 ] || fail 'locked'
+[ "$(getprop ro.gsid.image_running)" = 1 ] || fail 'DSU required'
+[ "$(cat /proc/sys/kernel/random/boot_id)" = @@BOOT_ID@@ ] || fail 'boot changed'
+[ "$(cat /metadata/gsi/dsu/install_status)" = disabled ] || fail 'DSU still armed'
+[ "$(cat /metadata/gsi/dsu/one_shot_boot)" = 1 ] || fail 'single-use DSU required'
+partition=/dev/block/by-name/init_boot_b
+[ -b "$partition" ] || fail 'not a block device'
+[ "$(readlink -f "$partition")" = /dev/block/mmcblk0p23 ] || fail 'partition mapping changed'
+[ "$(cat /sys/class/block/mmcblk0p23/size)" = 16384 ] || fail 'partition size changed'
+image=@@PATCH_PATH@@
+backup=@@STOCK_PATH@@
+[ "$(stat -c %s "$image")" = 8388608 ] || fail 'image size mismatch'
+[ "$(stat -c %s "$backup")" = 8388608 ] || fail 'backup size mismatch'
+[ "$(onn26_file_sha256 "$image")" = @@PATCH_SHA256@@ ] || fail 'patch hash mismatch'
+[ "$(onn26_file_sha256 "$backup")" = @@STOCK_SHA256@@ ] || fail 'backup hash mismatch'
+[ "$(onn26_file_sha256 "$partition")" = @@STOCK_SHA256@@ ] || fail 'partition no longer stock'
+if [ "$1" = --check-only ]; then
+    printf '%s\n' 'PREFLIGHT_VERIFIED'
+    exit 0
+fi
+# Atomic consumed marker. It must be durably recorded before the first block write.
+attempt=@@ATTEMPT_PATH@@
+mkdir -m 700 "$attempt" || fail 'attempt already consumed or journal unavailable'
+printf '%s\n' @@BOOT_ID@@ @@SERIAL@@ @@PATCH_SHA256@@ > "$attempt/attempt-consumed"
+sync
+# The sole firmware write. Any failure stops here without reboot or automatic restore.
+dd if="$image" of="$partition" bs=4096 count=2048 conv=notrunc,fsync
+actual=$(onn26_file_sha256 "$partition")
+[ "$actual" = @@PATCH_SHA256@@ ] || fail 'readback mismatch; do not reboot'
+printf '%s\n' "$actual" > "$attempt/readback-verified"
+sync
+printf '%s\n' 'FLASH_READBACK_VERIFIED' "$actual"

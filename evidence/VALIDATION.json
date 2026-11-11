@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-10",
+  "profile": "jarvis2-15640252-b",
+  "unlock_verified": true,
+  "root_installed": true,
+  "magisk_version": "30.7",
+  "root_in_original_android_verified": true,
+  "root_after_official_setup_reboot_verified": true,
+  "selinux_enforcing": true,
+  "firmware_write_invocations": 1,
+  "host_tests": {
+    "python_methods": 17,
+    "flash_template_scenarios": 11,
+    "native_protocol_scenarios": 11
+  },
+  "clean_packaged_dsu_build_verified": true,
+  "stock_inode_records_preserved": 2461,
+  "packaged_helper_loaded_elf_sections_match_tested_helper": true,
+  "automatic_startup_scripts_installed": false,
+  "temporary_root_exploits_used": false,
+  "dsu_removed_after_install": true,
+  "independent_restore_after_failed_init_boot_proven": false,
+  "whole_packaged_destructive_workflow_replayed": false,
+  "automatic_system_update_preference": "ota_disable_automatic_update=1",
+  "packaged_disable_updates_and_fresh_readback_verified": true
+}

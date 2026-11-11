@@ -1,0 +1,50 @@
+{
+  "id": "jarvis2-15640252-b",
+  "device": "jarvis2",
+  "fingerprint": "onn/jarvis2/jarvis2:14/URO3.260203.035.A1/15640252:user/release-keys",
+  "bootloader": "01.01.260525.135322",
+  "slot": "_b",
+  "abi": "armeabi-v7a",
+  "init_boot_size": 8388608,
+  "init_boot_sha256": "2bda4f31dd2fae6afef022e845c3e0ac0ac99a0dbccba78a00735b1a3986bf30",
+  "magisk_version": "30.7",
+  "magisk_apk_sha256": "e0d32d2123532860f97123d927b1bb86c4e08e6fd8a48bfc6b5bee0afae9ebd5",
+  "magisk_url": "https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk",
+  "ota_url": "https://android.googleapis.com/packages/ota-api/package/7c8075293d8380cc8f77feb9c47be5ed9d307adb.zip",
+  "ota_sha256": "7d8eeb206b0712db71fc0559ce66e1f9b9e97d7cd7dd9b821880c387d9aa70b2",
+  "ota_size": 911005562,
+  "root_partition": "init_boot_b",
+  "root_method_hardware_verified": true,
+  "unlock_hardware_verified": true,
+  "root_runtime": "/debug_ramdisk",
+  "root_block_path": "/dev/block/mmcblk0p23",
+  "root_stock_sha1": "cd52886a85583fa062d76aa94d754238b0f9c94f",
+  "dsu_partitions": {
+    "odm": {
+      "size": 512000,
+      "sha256": "94cdfd27e14f3662f96217f127206e0bb44ec8f3e33e4a7943916c6a8c91712f"
+    },
+    "product": {
+      "size": 541949952,
+      "sha256": "551d485d1194a6d2687e9c1dcab8ef638fcbcbf39bec74d2cf417666aeca19b4"
+    },
+    "system": {
+      "size": 483131392,
+      "sha256": "163790252b123680baa8ac6fc3363467e4a27eb1c81ef8dd6108f7e4f90892d0"
+    },
+    "system_ext": {
+      "size": 96161792,
+      "sha256": "c6e7857eec8fc386cae9ff7b8ce8e1918c34055e60abe051e08d50bf4b0ca38b"
+    },
+    "vendor": {
+      "size": 81158144,
+      "sha256": "852f34c0aafaf28b4d56c39f715fa553bdd9a05ad487446c9e38d9e9318f0562"
+    }
+  },
+  "avbtool": {
+    "url": "https://android.googlesource.com/platform/external/avb/+/android-14.0.0_r1/avbtool.py?format=TEXT",
+    "sha256": "1f1fddd2764eba76dc659415406062251edcf2eb6b4e83b0f01d0224cd631281"
+  },
+  "ndk_version": "28.2.13676358",
+  "dsu_stock_init_sha256": "2ca1dfe68078a6b8801f3733824117acbce6b823a1dea42aa54e434d1784539e"
+}

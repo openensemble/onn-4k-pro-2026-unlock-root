@@ -1,0 +1,22 @@
+work/
+cache/
+*.img
+*.apk
+*.zip
+*.pem
+*.key
+__pycache__/
+*.pyc
+.venv/
+native/test_unlock_logic
+
+
+# Local agent instructions and generated artifacts
+AGENTS.md
+*.gz
+*.tar
+*.erofs
+*.raw
+*.elf
+adbkey*
+onn26_binding.h
