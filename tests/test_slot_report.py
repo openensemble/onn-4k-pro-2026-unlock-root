@@ -119,7 +119,10 @@ class SlotReportTests(unittest.TestCase):
         collector, report = self.collect(fake)
         self.assertEqual(report["collection_status"], "complete")
         self.assertTrue(report["profile_comparison"]["active_slot_a"])
-        self.assertFalse(report["profile_comparison"]["active_slot_matches_installer"])
+        self.assertTrue(report["profile_comparison"]["active_slot_matches_installer"])
+        self.assertEqual(report["profile_comparison"]["installer_supported_slots"], ["_a", "_b"])
+        self.assertFalse(report["profile_comparison"]["root_method_hardware_verified"])
+        self.assertFalse(report["profile_comparison"]["unlock_hardware_verified"])
         self.assertFalse(report["installation_support_established"])
         entry = report["partitions"]["init_boot_a"]
         self.assertEqual(entry["mapping"]["value"], "/dev/block/mmcblk0p22")
@@ -137,6 +140,7 @@ class SlotReportTests(unittest.TestCase):
         self.assertEqual(report["collection_status"], "complete")
         self.assertFalse(report["profile_comparison"]["active_slot_a"])
         self.assertTrue(report["profile_comparison"]["active_slot_matches_installer"])
+        self.assertTrue(report["profile_comparison"]["root_method_hardware_verified"])
 
     def test_readable_metadata_and_only_bounded_init_boot_hashes(self):
         fake = FakeADB(readable=True)

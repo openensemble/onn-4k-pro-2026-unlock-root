@@ -26,7 +26,7 @@ same onn after IP changes, verifies permanent root, and turns off automatic syst
 A USB data cable or USB drive is not required.
 
 **Measured result, November 10, 2026:** persistent unlock and permanent
-**Magisk 30.7** root worked on one replacement unit. Root survived normal Android
+**Magisk 30.7** root worked on one replacement unit on **slot B**. Root survived normal Android
 boot and Magisk’s additional-setup reboot. The original Android installation
 returned, SELinux remained **Enforcing**, the flashed image matched its readback,
 and the temporary DSU installation was removed. No temporary-root exploit or
@@ -39,14 +39,28 @@ custom startup script was used.
 | Build ID / incremental | **URO3.260203.035.A1 / 15640252** |
 | Security patch | **2026-06-01** |
 | Bootloader | **01.01.260525.135322** |
-| Active slot | **`_b`** |
+| Active slot | **`_a` or `_b`**, detected and bound for the entire workflow |
 | Userspace | **ARM32 / `armeabi-v7a`** |
-| Root target | **`init_boot_b`**, 8 MiB |
+| Root target | Active **`init_boot_a`** (`mmcblk0p22`) or **`init_boot_b`** (`mmcblk0p23`), 8 MiB |
 
 This is support for that **exact build**, not every Android 14 firmware.
-Other builds, Android versions, active slots, and the older 2024 `jarvis` are
+Other builds, Android versions, and the older 2024 `jarvis` are
 outside the supported profile. The script checks these values and stops on a
 mismatch. Do not edit the profile to bypass a mismatch.
+
+**Slot B has hardware-verified unlock and root. Slot A is implemented and awaits
+its first successful complete hardware run.** A [community diagnostic report](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2#issuecomment-6833540065)
+confirmed the matching firmware and expected partition mappings on a locked
+slot-A unit; it did not verify unlocking, DSU boot or rooting on A. The guide
+shows this distinction before unlocking and installing root.
+
+The installer uses the current active slot and never switches slots. Its DSU
+helper, backup, flash and verification are bound to that slot and physical unit.
+Before flashing, it checks the active partition's mapping, 8 MiB size and exact
+pinned stock-image hash, and saves a verified backup. If any check fails it
+stops. A slot change also stops the saved workflow; the inactive slot is not
+used as a fallback. Existing slot-B connection and installation records remain
+valid, including completed or uncertain attempt journals.
 
 **Unlocking will factory-reset your onn and erase its apps, accounts, settings
 and other data. Unlocking or rooting could brick it: it may stop working and
@@ -152,11 +166,29 @@ The [advanced command reference](docs/MANUAL.md) retains the individual commands
 for inspection and reviewed manual work. Use `python3 onn2026.py --help` for
 options such as a custom ADB path. Do not mix manual mutations into an active guide.
 
+## If the temporary-system build stops
+
+`build-offline-dsu` prepares the temporary Android images on your computer.
+Build time depends on CPU and storage speed. This step now shows its current
+stage and compression progress, without the old 15-minute overall or 10-minute
+per-tool cutoffs. Ctrl-C stops the build and its tools and preserves the logs.
+
+After a failed or cancelled build, run the same guide command from the same
+checkout and keep the existing `work/` folder. The guide retries the local build
+in a fresh session and reuses the completed unlock and on-device patch records.
+It will only stage a temporary system after the new build passes validation.
+
+For a tool failure, the error gives its exit code and the combined
+`NNN-build-offline-dsu.log` path. The named tool log under that session's
+`dsu-build/` directory contains the tool's detailed output. Existing timeout
+receipts from older versions remain available for diagnosis.
+
 ## Collect a slot-A diagnostic report
 
 For a compatibility question such as [issue #2](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2),
 run the separate read-only collector. It accepts **slot A or B**, including a
-locked 2026 `jarvis2`, without changing the installer's slot-B requirement.
+locked 2026 `jarvis2`. The report distinguishes slots accepted by the installer
+from slots with hardware-verified unlock/root results.
 Only Python 3.10+ and Android platform-tools (`adb`) are needed; no root, NDK
 or firmware download is required.
 

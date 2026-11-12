@@ -119,8 +119,11 @@ jarvis2 running slot B. It confirmed both init_boot links and normal Android,
 reported denied size/hash access and unavailable boot-control information, and
 left the device unchanged. The generated public files were checked for absence
 of the target address, hardware serial and boot ID. Raw receipts remain in
-ignored `work/slot-reports/`. Slot-A behavior has been tested with fixtures;
-collection on real hardware actively running slot A is still untested.
+ignored `work/slot-reports/`. Later that day, a
+[community report](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2#issuecomment-6833540065)
+showed a complete collection on a locked slot-A unit with matching firmware,
+bootloader and expected init_boot mappings. Sizes and hashes remained unavailable.
+This is third-party diagnostic evidence, not a slot-A unlock or root result.
 
 ## Android installation-ID validation
 
@@ -136,10 +139,10 @@ paths, check exact receipt preservation, stop missing/invalid IDs before
 staging, and retain the mismatch guard when a short installation ID changes.
 These tests use fake device interfaces and forbid live subprocess calls.
 All **112 Python tests** passed after the fix on November 12, 2026, and the
-packaged-input hash verification passed. The reporting user's actual ID/output
-has not been supplied, so the regression reproduces a possible cause rather
-than confirming the cause on their unit. No live unlock, DSU boot or root flash
-was performed for this change.
+packaged-input hash verification passed. The reporter later confirmed a
+15-character ID and that the update let them proceed past this check; the ID
+itself was not supplied. No live unlock, DSU boot or root flash was performed
+for this change.
 
 ## Magisk launch and verification retry
 
@@ -169,3 +172,90 @@ The permission retry screen itself was tested offline with simulated responses.
 The owner then resumed the guide to completion. A final independent read-only
 check confirmed normal Android with DSU removed and automatic system updates
 disabled. No assistant-run install or restart was needed for this troubleshooting.
+
+## Active-slot A/B support — November 12, 2026
+
+The installer accepts either active slot on the same pinned firmware. Slot A
+targets `init_boot_a` / `mmcblk0p22`; slot B targets `init_boot_b` / `mmcblk0p23`.
+The selected slot remains part of the physical-device binding through unlock,
+DSU compilation and staging, backup, flashing, restart and permanent-root
+verification. There is no slot switch or inactive-slot fallback. The B build ID
+`jarvis2-15640252-b` is retained so existing build receipts and saved progress
+remain usable; attempt journals are not reset or migrated.
+
+Before privileged partition reads and before the sole firmware write, guards
+check the selected slot, expected block mapping and 8 MiB size. The exact pinned
+stock hash and verified backup remain prerequisites for writing. The compiled
+DSU helper checks the same slot. The standalone builder now requires `--slot`;
+the normal workflow supplies it from the verified device binding.
+
+Validation completed without contacting any device:
+
+- All **128 Python tests** passed. The flash-template test exercised **32
+  regular-file scenarios** across both slots, including wrong mappings and sizes,
+  changed slot/firmware/boot, bad images, consumed attempts, partial writes and
+  failed readback. The inactive fixture stayed unchanged in every case.
+- Simulated A and B installations exercised the real backup, install, restart
+  and permanent-root verification functions. Cross-slot patch/build receipts,
+  unexpected stock hashes and proof naming the inactive partition were refused.
+  Existing B connection/build records and no-replay behavior remained valid.
+- The real workflow built both DSU variants offline for a synthetic device
+  identity. Both preserved all **2,461 original filesystem paths**, passed file
+  and inode metadata verification, compiled SELinux policy and verified AVB.
+  Generated headers and compiled helpers contained the selected slot. The stock
+  archives matched across builds; the slot-bound root helpers and archives differed.
+- All **11 native unlock-protocol scenarios** passed. Packaged-input hashes,
+  guide preview, required builder-slot arguments and whitespace checks passed.
+
+The diagnostic report now uses schema `onn26-slot-report-v2`, with
+`installer_supported_slots` and separate per-slot hardware-verification flags.
+Raw community reports, build receipts and logs remain in ignored `work/`.
+Bulky synthetic-device test images were discarded after verification; their
+hashes and build logs were retained. No test image was staged or installed.
+
+**Slot B retains its earlier hardware-verified method status. Slot A has no
+completed unlock, DSU boot or permanent-root hardware validation yet.** The
+profile, guide, diagnostic output and instructions preserve this distinction.
+Offline tests do not establish physical recovery or eliminate failed-boot risk.
+
+## Offline DSU build timeout handling — November 12, 2026
+
+The reporter who confirmed a 15-character Android ID subsequently reported
+`build-offline-dsu` timing out. No exact error, command receipt, elapsed time or
+host specifications were supplied. Code inspection found a 900-second overall
+deadline and 600-second deadlines for each tool inside the DSU builder. These
+can terminate legitimate work on slower computers; the report alone does not
+identify which limit or tool was involved.
+
+The workflow now supervises `build-offline-dsu` with `host_build.py`. It has no
+fixed wall-clock deadline, streams stage and compression progress, and records
+complete output in a session log with a bounded tail in the JSON receipt.
+Ctrl-C stops the build's process group, including descendant tools, and records
+the interruption. Nonzero tool exits are reported as failures with exit codes
+and log paths. The previous device-command runner and its timeouts are unchanged.
+
+The guide already treats host builds as repeatable. It preserves previous
+sessions and retries a failed or cancelled build in a new directory, retaining
+the completed unlock and patch receipts. It does not stage partial build output.
+
+All **138 Python tests** passed, including eight new host-process tests and two
+guide-resume regressions. These check live progress before completion, retained
+diagnostics, real command failures without retries, missing tools, bounded
+receipt output, orphaned descendants, cancellation of TERM-ignoring tools,
+unchanged device timeouts, and resuming after an old timeout or cancellation
+without repeating unlock, restart or patch preparation.
+
+A subsequent full regression reran all 138 Python tests and 11 native protocol
+scenarios, reproduced both packaged ARM helper binaries, and checked Python
+compilation, CLI entry points, guide preview, package hashes and whitespace.
+Both A and B temporary systems were then built through the real host supervisor,
+with metadata, file contents, policy and AVB validation passing.
+
+The first default rebuild had a different root-image hash because `mkfs.erofs`
+generated a new filesystem UUID. For the regression comparison only, wrappers
+passed each previous build's UUID to `mkfs.erofs -U`. Both resulting root images,
+root archives, stock archives and compiled helpers then matched the earlier
+verified outputs byte for byte. Production UUID behavior was not changed.
+These were synthetic-device offline builds; no onn was contacted, unlocked,
+flashed or rebooted. Detailed receipts and logs are in ignored
+`work/20261112T200726Z-full-regression/`.

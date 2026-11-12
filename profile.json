@@ -1,9 +1,24 @@
 {
-  "id": "jarvis2-15640252-b",
+  "id": "jarvis2-15640252",
   "device": "jarvis2",
   "fingerprint": "onn/jarvis2/jarvis2:14/URO3.260203.035.A1/15640252:user/release-keys",
   "bootloader": "01.01.260525.135322",
-  "slot": "_b",
+  "slots": {
+    "_a": {
+      "id": "jarvis2-15640252-a",
+      "root_partition": "init_boot_a",
+      "root_block_path": "/dev/block/mmcblk0p22",
+      "root_method_hardware_verified": false,
+      "unlock_hardware_verified": false
+    },
+    "_b": {
+      "id": "jarvis2-15640252-b",
+      "root_partition": "init_boot_b",
+      "root_block_path": "/dev/block/mmcblk0p23",
+      "root_method_hardware_verified": true,
+      "unlock_hardware_verified": true
+    }
+  },
   "abi": "armeabi-v7a",
   "init_boot_size": 8388608,
   "init_boot_sha256": "2bda4f31dd2fae6afef022e845c3e0ac0ac99a0dbccba78a00735b1a3986bf30",
@@ -13,11 +28,7 @@
   "ota_url": "https://android.googleapis.com/packages/ota-api/package/7c8075293d8380cc8f77feb9c47be5ed9d307adb.zip",
   "ota_sha256": "7d8eeb206b0712db71fc0559ce66e1f9b9e97d7cd7dd9b821880c387d9aa70b2",
   "ota_size": 911005562,
-  "root_partition": "init_boot_b",
-  "root_method_hardware_verified": true,
-  "unlock_hardware_verified": true,
   "root_runtime": "/debug_ramdisk",
-  "root_block_path": "/dev/block/mmcblk0p23",
   "root_stock_sha1": "cd52886a85583fa062d76aa94d754238b0f9c94f",
   "dsu_partitions": {
     "odm": {

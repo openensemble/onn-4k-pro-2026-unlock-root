@@ -10,16 +10,16 @@ case "$1" in --check-only|--write-once) ;; *) fail 'unknown action';; esac
 [ "$(getprop ro.serialno)" = @@SERIAL@@ ] || fail 'physical unit mismatch'
 [ "$(getprop ro.build.fingerprint)" = @@FINGERPRINT@@ ] || fail 'firmware mismatch'
 [ "$(getprop ro.bootloader)" = @@BOOTLOADER@@ ] || fail 'bootloader mismatch'
-[ "$(getprop ro.boot.slot_suffix)" = _b ] || fail 'slot mismatch'
+[ "$(getprop ro.boot.slot_suffix)" = @@SLOT@@ ] || fail 'slot mismatch'
 [ "$(getprop ro.boot.flash.locked)" = 0 ] || fail 'locked'
 [ "$(getprop ro.gsid.image_running)" = 1 ] || fail 'DSU required'
 [ "$(cat /proc/sys/kernel/random/boot_id)" = @@BOOT_ID@@ ] || fail 'boot changed'
 [ "$(cat /metadata/gsi/dsu/install_status)" = disabled ] || fail 'DSU still armed'
 [ "$(cat /metadata/gsi/dsu/one_shot_boot)" = 1 ] || fail 'single-use DSU required'
-partition=/dev/block/by-name/init_boot_b
+partition=@@PARTITION@@
 [ -b "$partition" ] || fail 'not a block device'
-[ "$(readlink -f "$partition")" = /dev/block/mmcblk0p23 ] || fail 'partition mapping changed'
-[ "$(cat /sys/class/block/mmcblk0p23/size)" = 16384 ] || fail 'partition size changed'
+[ "$(readlink -f "$partition")" = @@BLOCK_PATH@@ ] || fail 'partition mapping changed'
+[ "$(cat @@SIZE_PATH@@)" = 16384 ] || fail 'partition size changed'
 image=@@PATCH_PATH@@
 backup=@@STOCK_PATH@@
 [ "$(stat -c %s "$image")" = 8388608 ] || fail 'image size mismatch'

@@ -202,9 +202,18 @@ The script requires a running but already-disabled single-use root DSU. It
 checks the helper, original image, prepared patch and device identity; saves a
 binary stock backup; runs all flash guards in check-only mode on Android; and
 records host and device attempt markers before the only partition write.
-It writes exactly 8 MiB to `init_boot_b`, flushes it, reads it back independently,
+It writes exactly 8 MiB to the bound active `init_boot_a` or `init_boot_b`,
+flushes it, reads it back independently,
 and removes the flasher. It does not write another slot, vbmeta or bootloader,
 and does not install a script at boot.
+
+Slot B has hardware-verified unlock and root. Slot A is implemented but awaits
+a successful complete hardware run. The selected slot comes from the device's
+saved identity, including when building the DSU helper. The standalone offline
+builder requires an explicit `--slot _a` or `--slot _b`; the workflow supplies
+the verified slot automatically. The active partition's exact mapping, size and
+stock hash must pass before any firmware write. Never change the active slot or
+edit saved bindings to get past a refusal.
 
 Continue only after `verified_flash: true`. If any write fails or times out,
 keep the current session running and inspect the receipts. **Do not rerun the

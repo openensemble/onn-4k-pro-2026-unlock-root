@@ -122,7 +122,7 @@ class Collector:
         if expected_serial:
             self.secrets.add(expected_serial)
         self.report = {
-            "schema": "onn26-slot-report-v1",
+            "schema": "onn26-slot-report-v2",
             "collected_at": datetime.now(timezone.utc).isoformat(),
             "collection_status": "incomplete",
             "diagnostic_only": True,
@@ -208,10 +208,15 @@ class Collector:
                 "firmware_matches": values["ro.build.fingerprint"] == self.profile["fingerprint"],
                 "bootloader_matches": values["ro.bootloader"] == self.profile["bootloader"],
                 "abi_matches": self.profile["abi"] in values.get("ro.product.cpu.abilist", "").split(","),
-                "installer_requires_slot": self.profile["slot"],
-                "active_slot_matches_installer": values["ro.boot.slot_suffix"] == self.profile["slot"],
+                "installer_supported_slots": sorted(self.profile["slots"]),
+                "active_slot_matches_installer": values["ro.boot.slot_suffix"] in self.profile["slots"],
                 "active_slot_a": values["ro.boot.slot_suffix"] == "_a",
             }
+            comparison = self.report["profile_comparison"]
+            matches = all(comparison[key] for key in ("firmware_matches", "bootloader_matches", "abi_matches"))
+            slot = self.profile["slots"].get(values["ro.boot.slot_suffix"], {})
+            for kind in ("unlock", "root_method"):
+                comparison[kind + "_hardware_verified"] = matches and slot.get(kind + "_hardware_verified") is True
             self.report["shell_uid"] = parsed(self.query("shell-uid", "id", "-u"), integer)
             self.report["selinux"] = parsed(self.query("selinux", "getenforce"),
                                              one_of("Enforcing", "Permissive", "Disabled"))
@@ -308,7 +313,7 @@ class Collector:
 
 def text_report(report):
     return ("onn 4K Pro 2026 — read-only slot diagnostic\n"
-            "This report does not establish unlock/root support for slot A.\n"
+            "This diagnostic does not verify an unlock/root installation on either slot.\n"
             "Unavailable fields are unknown. Review this report before sharing.\n\n"
             + json.dumps(report, indent=2, ensure_ascii=False) + "\n")
 

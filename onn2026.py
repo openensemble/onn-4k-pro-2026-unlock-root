@@ -73,13 +73,25 @@ def parse_lock_state(text):
     return rows[0]["a"]
 
 
+def slot_profile(binding):
+    """Select only the explicitly bound slot; never default or change slots."""
+    slot = binding.get("ro.boot.slot_suffix")
+    require(slot in ("_a", "_b") and slot in PROFILE["slots"],
+            "Unsupported or missing active slot: ro.boot.slot_suffix")
+    return PROFILE["slots"][slot]
+
+
+def root_partition(binding):
+    return "/dev/block/by-name/" + slot_profile(binding)["root_partition"]
+
+
 def validate_identity(props, unlocked=False):
     expected = {"ro.product.device": PROFILE["device"],
                 "ro.build.fingerprint": PROFILE["fingerprint"],
-                "ro.bootloader": PROFILE["bootloader"],
-                "ro.boot.slot_suffix": PROFILE["slot"]}
+                "ro.bootloader": PROFILE["bootloader"]}
     for key, value in expected.items():
         require(props.get(key) == value, "Unsupported or changed device: " + key)
+    slot_profile(props)
     require(re.fullmatch(r"JUSA[A-Za-z0-9]+", props.get("ro.serialno", "")),
             "Missing or unexpected jarvis2 hardware serial")
     require(PROFILE["abi"] in props.get("ro.product.cpu.abilist", "").split(","),
@@ -190,6 +202,7 @@ def status(device, name=None):
     props = device.identify()
     state, boot = lock_state(device)
     result = {"at": now(), "binding": device.binding, "boot_id": boot,
+              "slot_profile": dict(slot_profile(device.binding)),
               "secure_lock_state": state, "boot_completed": props.get("sys.boot_completed"),
               "boot_properties": {k: props.get(k) for k in UNLOCKED},
               "unlocked_on_current_boot": state == 0 and all(props.get(k) == v for k, v in UNLOCKED.items()),
@@ -222,7 +235,7 @@ def unlock(device, accepted):
                    "session": str(device.s.path), "remote": remote,
                    "max_write_invocations": 1, "automatic_retry": False}, exclusive=True)
     args = [remote + "/unlock_once", "--unlock-once", props["ro.serialno"],
-            PROFILE["fingerprint"], PROFILE["bootloader"], PROFILE["slot"], boot,
+            PROFILE["fingerprint"], PROFILE["bootloader"], device.binding["ro.boot.slot_suffix"], boot,
             remote + "/attempt-consumed"]
     result = device.shell("unlock-once", *args, timeout=15, check=False)
     save(device.s.path / "unlock-execution.json", result)

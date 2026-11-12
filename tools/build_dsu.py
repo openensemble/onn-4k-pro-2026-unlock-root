@@ -16,7 +16,7 @@ import tarfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import onn2026 as o
-from erofs_metadata import Metadata
+from tools.erofs_metadata import Metadata
 
 POLICY = '''
 ; DSU-only owner console; stock Android policy is not changed.
@@ -43,10 +43,20 @@ on property:sys.boot_completed=1
 '''
 
 
-def command(argv, log):
+def progress(message):
+    print("[build] " + message, flush=True)
+
+
+def command(argv, log, description):
+    progress(description + "...")
     with Path(log).open("x") as stream:
-        subprocess.run([str(v) for v in argv], check=True, stdout=stream,
-                       stderr=subprocess.STDOUT, timeout=600)
+        try:
+            # Host-only work may legitimately take longer on a slower computer.
+            # The supervising runner stops this process group on cancellation.
+            subprocess.run([str(v) for v in argv], check=True, stdout=stream,
+                           stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            raise o.Stop(f"{description} failed (exit {error.returncode}). Tool log: {log}") from error
 
 
 def metadata(path):
@@ -60,15 +70,26 @@ def metadata(path):
 
 
 def compress(source, dest):
+    label = "Compressing " + Path(dest).name
+    progress(label + "...")
+    total = Path(source).stat().st_size
+    copied, next_update = 0, 64 * 1024 * 1024
     with Path(source).open("rb") as inp, Path(dest).open("xb") as raw:
         with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0,
                           compresslevel=1) as out:
-            shutil.copyfileobj(inp, out, 1024 * 1024)
+            while chunk := inp.read(1024 * 1024):
+                out.write(chunk)
+                copied += len(chunk)
+                if copied >= next_update:
+                    progress(f"{label}: {copied * 100 // total}%")
+                    next_update += 64 * 1024 * 1024
+    progress(label + ": complete")
 
 
 def build(args):
     o.require(__debug__, "Python optimization disables parser assertions; omit -O")
     o.require(re.fullmatch(r"JUSA[A-Za-z0-9]+", args.serial), "Invalid hardware serial")
+    slot = o.slot_profile({"ro.boot.slot_suffix": args.slot})
     o.require(o.PROFILE["ndk_version"] in (args.ndk / "source.properties").read_text(),
               "Use the recorded Android NDK revision")
     o.require(o.digest(args.avbtool) == o.PROFILE["avbtool"]["sha256"], "AVB tool hash mismatch")
@@ -81,24 +102,28 @@ def build(args):
     out.mkdir(parents=True, exist_ok=False)
     roots = {}
     for name, pin in o.PROFILE["dsu_partitions"].items():
+        progress("Checking the stock " + name + " image...")
         image = args.images / (name + ".img")
         o.require(image.stat().st_size == pin["size"] and o.digest(image) == pin["sha256"],
                   "Stock partition does not match the pinned OTA: " + name)
         roots[name] = out / (name + "-stock")
         command([args.fsck_erofs, "--extract=" + str(roots[name]), "--no-preserve", image],
-                out / (name + "-extract.log"))
+                out / (name + "-extract.log"), "Extracting " + name)
+    progress("Reading the original filesystem metadata...")
     rows = metadata(args.images / "system.img")
     o.save(out / "stock-metadata.json", rows)
     tree = out / "tree"
+    progress("Copying the temporary system's files...")
     shutil.copytree(roots["system"], tree, symlinks=True)
 
     header = {"ONN26_SERIAL": args.serial, "ONN26_FINGERPRINT": o.PROFILE["fingerprint"],
-              "ONN26_BOOTLOADER": o.PROFILE["bootloader"], "ONN26_SLOT": o.PROFILE["slot"]}
+              "ONN26_BOOTLOADER": o.PROFILE["bootloader"], "ONN26_SLOT": args.slot}
     (out / "onn26_binding.h").write_text("".join(
         "#define " + k + " " + json.dumps(v) + "\n" for k, v in header.items()))
     compiler = args.ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi28-clang"
     command([compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-fPIE", "-pie",
-             "-I", out, o.ROOT / "native/dsu_console.c", "-o", out / "onn26-su"], out / "native-build.log")
+             "-I", out, o.ROOT / "native/dsu_console.c", "-o", out / "onn26-su"], out / "native-build.log",
+             "Compiling the temporary root helper")
 
     added = {
         "system/bin/onn26-su": ((out / "onn26-su").read_bytes(), 0o4750,
@@ -134,11 +159,12 @@ def build(args):
     o.require(len(components) == 7, "Unexpected stock SELinux components")
     command([args.secilc, "-m", "-M", "true", "-G", "-N", "-c", "30", "-o",
              out / "compiled-sepolicy", "-f", out / "compiled-file-contexts", *components],
-            out / "policy-build.log")
+            out / "policy-build.log", "Compiling the temporary system's security policy")
 
     # The original EROFS metadata is authoritative. Linux host symlinks cannot
     # preserve the original link modes; PAX records can. Raw SCHILY values avoid
     # erofs-utils 1.7.1's incompatible LIBARCHIVE base64 decoding.
+    progress("Packing the temporary filesystem...")
     with tarfile.open(out / "system.tar", "w", format=tarfile.PAX_FORMAT) as archive:
         for name, row in sorted(tar_rows.items()):
             item = tarfile.TarInfo(name or ".")
@@ -161,9 +187,10 @@ def build(args):
                 raise o.Stop("Unexpected stock inode type: " + name)
     erofs = out / "system.erofs"
     command([args.mkfs_erofs, "--tar=f", "-zlz4hc,9", "-C4096", "-T1230768000",
-             erofs, out / "system.tar"], out / "mkfs.log")
+             erofs, out / "system.tar"], out / "mkfs.log", "Building the temporary Android filesystem")
     command([args.fsck_erofs, "--extract=" + str(out / "verify-tree"), "--no-preserve", erofs],
-            out / "verify-extract.log")
+            out / "verify-extract.log", "Checking the rebuilt filesystem")
+    progress("Verifying every filesystem entry and file...")
     actual = metadata(erofs)
     changed = {"system/etc/selinux/plat_sepolicy.cil", "system/etc/selinux/plat_file_contexts",
                "system/etc/selinux/plat_sepolicy_and_mapping.sha256"}
@@ -192,13 +219,15 @@ def build(args):
              "--do_not_generate_fec", "--salt", "9c36d1cb9303ad93fda0f340d31b24ccf8892ee3a1d9198bb6b94acf0772d625",
              "--prop", "com.android.build.system.os_version:14", "--prop",
              "com.android.build.system.fingerprint:" + o.PROFILE["fingerprint"], "--prop",
-             "com.android.build.system.security_patch:2026-06-01"], out / "avb-footer.log")
-    command([*avb, "verify_image", "--image", image], out / "avb-verify.log")
+             "com.android.build.system.security_patch:2026-06-01"], out / "avb-footer.log",
+             "Adding Android verification data")
+    command([*avb, "verify_image", "--image", image], out / "avb-verify.log",
+            "Verifying the rebuilt Android image")
     compress(image, out / "system.root.raw.gz")
     compress(args.images / "system.img", out / "system.stock.raw.gz")
-    result = {"at": o.now(), "profile": o.PROFILE["id"], "serial": args.serial,
+    result = {"at": o.now(), "profile": slot["id"], "serial": args.serial,
               "fingerprint": o.PROFILE["fingerprint"], "bootloader": o.PROFILE["bootloader"],
-              "slot": o.PROFILE["slot"], "system_bytes": image.stat().st_size,
+              "slot": args.slot, "system_bytes": image.stat().st_size,
               "root_image_sha256": o.digest(image), "helper_sha256": o.digest(out / "onn26-su"),
               "root_gzip": str(out / "system.root.raw.gz"),
               "root_gzip_sha256": o.digest(out / "system.root.raw.gz"),
@@ -211,12 +240,15 @@ def build(args):
               "changed": sorted(changed), "added": sorted(added), "stock_paths": len(rows),
               "firmware_written": False}
     o.save(out / "build.json", result, exclusive=True)
+    progress("Both temporary Android images are built and verified.")
     print(json.dumps(result, indent=2))
 
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--serial", required=True)
+    p.add_argument("--slot", required=True, choices=("_a", "_b"),
+                   help="The verified active slot from the selected device; no default")
     p.add_argument("--images", type=Path, required=True)
     p.add_argument("--ndk", type=Path, required=True)
     p.add_argument("--adb-public-key", type=Path, required=True)
@@ -229,4 +261,8 @@ def parser():
 
 
 if __name__ == "__main__":
-    build(parser().parse_args())
+    try:
+        build(parser().parse_args())
+    except (o.Stop, OSError, subprocess.SubprocessError) as error:
+        progress("FAILED: " + str(error))
+        sys.exit(2)

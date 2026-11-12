@@ -12,7 +12,7 @@ from guide_core import RootAccessUnavailable
 BOOT = "11111111-2222-3333-4444-555555555555"
 BINDING = {"ro.serialno": "JUSA123456", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
-           "ro.boot.slot_suffix": o.PROFILE["slot"]}
+           "ro.boot.slot_suffix": "_b"}
 
 
 class Device:

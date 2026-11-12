@@ -14,7 +14,7 @@ HASH = "a" * 64
 ANDROID_ID = "1122334455667788"
 BINDING = {"ro.serialno": "JUSAREBOOTONLY", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
-           "ro.boot.slot_suffix": o.PROFILE["slot"]}
+           "ro.boot.slot_suffix": "_b"}
 
 
 class Device(o.Device):
@@ -47,9 +47,9 @@ class Device(o.Device):
         if args == ("sync",):
             self.on_sync()
             return {"returncode": 0, "timed_out": False, "stdout": ""}
-        if args == ("/system/bin/onn26-su", "-c", "sha256sum /dev/block/by-name/init_boot_b"):
+        if args == ("/system/bin/onn26-su", "-c", flow.partition_hash_command(self.binding)):
             return {"returncode": 0, "timed_out": False,
-                    "stdout": self.image_hash + "  /dev/block/by-name/init_boot_b\n"}
+                    "stdout": self.image_hash + "  " + o.root_partition(self.binding) + "\n"}
         raise AssertionError((label, args))
 
     def call(self, label, *args, **kwargs):

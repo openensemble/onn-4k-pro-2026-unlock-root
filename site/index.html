@@ -106,11 +106,11 @@
             <div><dt>Build</dt><dd><code>URO3.260203.035.A1</code><br><strong>15640252</strong></dd></div>
             <div><dt>Security patch</dt><dd><code>2026-06-01</code></dd></div>
             <div><dt>Bootloader</dt><dd><code>01.01.260525.135322</code></dd></div>
-            <div><dt>Active slot</dt><dd><code>_b</code></dd></div>
+            <div><dt>Active slot</dt><dd><code>_a</code> or <code>_b</code></dd></div>
             <div><dt>Userspace</dt><dd>ARM32 <code>armeabi-v7a</code></dd></div>
-            <div><dt>Root target</dt><dd><code>init_boot_b</code> <span class="spec-secondary">8 MiB</span></dd></div>
+            <div><dt>Root target</dt><dd>Active <code>init_boot_a</code> or <code>init_boot_b</code> <span class="spec-secondary">8 MiB</span></dd></div>
           </dl>
-          <p class="spec-footnote">Keep the profile checks intact. Do not edit them to bypass a mismatch.</p>
+          <p class="spec-footnote">Slot B has hardware-verified unlock and root. Slot A is implemented and awaits its first successful complete hardware run. The installer keeps the selected slot throughout. Keep the profile checks intact.</p>
         </div>
       </div>
     </section>
@@ -162,7 +162,7 @@ python3 onn2026.py</code></pre>
         <div class="evidence-grid">
           <article class="evidence-tested">
             <p class="evidence-label"><span class="status-dot" aria-hidden="true"></span>WHAT WAS TESTED</p>
-            <h3>Measured on one supported onn.</h3>
+            <h3>Measured on one supported onn on slot B.</h3>
             <ul>
               <li>Persistent unlock and <strong>Magisk 30.7 root</strong> after normal Android and Magisk’s setup reboot.</li>
               <li>The temporary Android return, root console, one <code>init_boot</code> flash and independent readback.</li>
@@ -175,6 +175,7 @@ python3 onn2026.py</code></pre>
             <p class="evidence-label">WHAT WAS NOT TESTED</p>
             <h3>These limits still apply.</h3>
             <ul>
+              <li>A complete unlock, temporary-system boot and permanent-root installation on slot A.</li>
               <li>The complete guided installer on a real device from start to finish.</li>
               <li>The new automatic restart and reconnect logic under real network conditions.</li>
               <li>Recovery after power loss or an unbootable modified <code>init_boot</code> image.</li>

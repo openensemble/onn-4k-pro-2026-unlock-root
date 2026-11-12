@@ -18,7 +18,7 @@ NEW = "192.0.2.88:5555"
 THIRD = "192.0.2.99:5555"
 BINDING = {"ro.serialno": "JUSADEMOA", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
-           "ro.boot.slot_suffix": o.PROFILE["slot"]}
+           "ro.boot.slot_suffix": "_b"}
 
 
 def props(serial="JUSADEMOA", **changes):
@@ -203,7 +203,7 @@ class Connections(unittest.TestCase):
 
     def test_corrupt_or_unsupported_saved_binding_is_rejected(self):
         for record in ({}, {"schema": "wrong"}, {"schema": c.SCHEMA, "binding": {}},
-                       {**c.load(self.path), "binding": {**BINDING, "ro.boot.slot_suffix": "_a"}}):
+                       {**c.load(self.path), "binding": {**BINDING, "ro.boot.slot_suffix": "_c"}}):
             with self.subTest(record=record):
                 path = Path(self.tmp.name) / "bad.json"
                 o.save(path, record)

@@ -17,12 +17,13 @@ from guide_core import ROOT_ACCESS_HELP, RootAccessUnavailable
 
 BINDING = {"ro.serialno": "JUSAGUIDEONLY", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
-           "ro.boot.slot_suffix": o.PROFILE["slot"]}
+           "ro.boot.slot_suffix": "_b"}
 
 
 class FakeBackend:
-    def __init__(self, work, locked=True):
+    def __init__(self, work, locked=True, binding=None):
         self.work, self.locked = Path(work), locked
+        self.binding = dict(binding or BINDING)
         self.calls, self.prepared = [], []
         self.failures, self.answers = {}, {}
         self.connection_failure = None
@@ -46,10 +47,10 @@ class FakeBackend:
         canned = {
             "host": {"ndk": "/example/ndk", "adb_public_key": "/example/adbkey.pub",
                      "mkfs_erofs": "mkfs.erofs", "fsck_erofs": "fsck.erofs", "secilc": "secilc"},
-            "baseline": {"binding": BINDING, "boot_id": "11111111-2222-3333-4444-555555555555",
+            "baseline": {"binding": self.binding, "boot_id": "11111111-2222-3333-4444-555555555555",
                          "secure_lock_state": int(self.locked), "unlocked_on_current_boot": not self.locked,
                          "write_invocations": 0},
-            "unlock": {"binding": BINDING, "boot_id": "11111111-2222-3333-4444-555555555555",
+            "unlock": {"binding": self.binding, "boot_id": "11111111-2222-3333-4444-555555555555",
                        "write_invocations": 1, "secure_lock_state": 0},
             "unlock_reboot": {"reboot_requests": 1, "already_rebooted": False, "transport": {"timed_out": True}},
             "install_reboot": {"reboot_requests": 1, "already_rebooted": False, "transport": {"timed_out": True}},
@@ -130,6 +131,24 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.calls, [])
         self.assertFalse(g.accepted(self.state))
         self.assertEqual(self.state["phase"], "consent")
+
+    def test_slot_a_notice_appears_in_existing_acceptances_and_flow_completes(self):
+        binding = {**BINDING, "ro.boot.slot_suffix": "_a"}
+        self.record = {**self.record, "binding": binding}
+        self.state = g.initial_state(self.record, self.connection_file)
+        self.backend = FakeBackend(self.work, binding=binding)
+        self.guide = g.Guide(self.path, self.state, self.backend, self.ui)
+        acceptances = []
+        self.ui.choose = lambda: acceptances.append(self.messages[-1]) or True
+        self.guide.run()
+        self.assertEqual(self.state["phase"], "complete")
+        self.assertEqual(len(acceptances), 3)
+        for message in acceptances:
+            self.assertIn("Active slot A", message)
+            self.assertIn("has not yet been verified on hardware", message)
+        self.assertEqual(self.state["consent"]["binding"], binding)
+        self.assertEqual(self.backend.count("unlock"), 1)
+        self.assertEqual(self.backend.count("install"), 1)
 
     def test_declining_unlock_starts_no_unlock_or_root_write(self):
         self.ui.choose = lambda: self.state["phase"] != "unlock"
@@ -246,6 +265,31 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.count("verify"), 2)
         self.assertEqual(self.backend.count("install"), 1)
         self.assertEqual(self.backend.count("root_boot"), 1)
+
+    def assert_build_resumes_without_replaying_device_work(self, failure):
+        self.backend.failures["build"] = failure
+        with self.assertRaises(type(failure)):
+            self.guide.run()
+        self.assertEqual(self.state["phase"], "build")
+        self.assertEqual(self.state["pending"]["phase"], "build")
+        for phase in ("unlock", "unlock_reboot", "patch"):
+            self.assertEqual(self.backend.count(phase), 1)
+        self.assertEqual(self.backend.count("stock_stage"), 0)
+        previous_patch = dict(self.state["results"]["patch"])
+        self.backend.failures.clear()
+        resumed = self.resume()
+        resumed.run()
+        self.assertEqual(resumed.state["phase"], "complete")
+        self.assertEqual(self.backend.count("build"), 2)
+        self.assertEqual(resumed.state["results"]["patch"], previous_patch)
+        for phase in ("unlock", "unlock_reboot", "patch", "stock_stage", "install"):
+            self.assertEqual(self.backend.count(phase), 1)
+
+    def test_old_build_timeout_resumes_without_unlocking_or_patching_again(self):
+        self.assert_build_resumes_without_replaying_device_work(o.Stop("build-offline-dsu timed out"))
+
+    def test_cancelled_host_build_resumes_without_unlocking_or_patching_again(self):
+        self.assert_build_resumes_without_replaying_device_work(KeyboardInterrupt())
 
     def test_verification_waits_for_remote_before_first_request(self):
         self.ui.read = lambda prompt: "q" if self.state["phase"] == "verify" else ""

@@ -17,7 +17,7 @@ def props():
         'ro.product.device': o.PROFILE['device'],
         'ro.build.fingerprint': o.PROFILE['fingerprint'],
         'ro.bootloader': o.PROFILE['bootloader'],
-        'ro.boot.slot_suffix': o.PROFILE['slot'],
+        'ro.boot.slot_suffix': '_b',
         'ro.product.cpu.abilist': 'armeabi-v7a,armeabi',
         'ro.boot.flash.locked': '1',
         'ro.boot.verifiedbootstate': 'green',
@@ -27,7 +27,7 @@ def props():
 class FakeDevice:
     def __init__(self, directory, result=None):
         self.s = o.Session(directory, 'test')
-        self.binding = {'ro.serialno': 'JUSA_TEST_ONLY'}
+        self.binding = {'ro.serialno': 'JUSA_TEST_ONLY', 'ro.boot.slot_suffix': '_b'}
         self.calls = []
         self.result = result or {'returncode': None, 'timed_out': True, 'stdout': ''}
 

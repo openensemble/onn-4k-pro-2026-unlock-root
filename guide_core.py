@@ -84,6 +84,10 @@ REPEATABLE = {"host", "baseline", "unlocked_check", "fetch", "build", "stock_wai
               "stock_return", "root_ready", "normal_check", "verify", "updates_check"}
 PREVIEW = """2026 onn unlock and root guide
 
+The exact supported firmware may run on active slot A or B. The guide keeps
+that slot throughout. Slot B has hardware verification; slot A awaits a
+successful complete hardware run.
+
 1. Enable Developer mode, USB debugging and Wi-Fi/network debugging, then choose your onn.
 2. Read and accept the factory-reset, data-loss and bricking warning.
 3. Check the computer, Android version and selected onn.
@@ -169,6 +173,15 @@ def confirm_device(ui, name, serial):
 
 def show_stopped(ui):
     ui.page("Walkthrough stopped", "Run the script again when you are ready to continue.")
+
+
+def slot_notice(binding):
+    slot = binding.get("ro.boot.slot_suffix")
+    require(slot in ("_a", "_b"), "The selected onn has no supported active slot")
+    if slot == "_a":
+        return ("Active slot A: installer support is implemented, but a complete unlock and root\n"
+                "installation on slot A has not yet been verified on hardware.\n\n")
+    return "Active slot B: unlock and root have been verified on hardware for this firmware.\n\n"
 
 
 @contextmanager
@@ -316,14 +329,16 @@ class Guide:
                            "This repeats only the root check. You can also type q and resume later.")
 
     def run(self):
-        self.ui.device_label = self.state["name"] + " | serial " + self.state["binding"]["ro.serialno"]
+        support_notice = slot_notice(self.state["binding"])
+        self.ui.device_label = (self.state["name"] + " | serial " + self.state["binding"]["ro.serialno"] +
+                                " | slot " + self.state["binding"]["ro.boot.slot_suffix"][-1].upper())
         self.ui.page("Continue your walkthrough")
         self.recover_pending()
         while True:
             phase, results = self.state["phase"], self.state["results"]
             self.ui.page(PAGE_TITLES.get(phase, "Check saved progress"))
             if phase == "consent":
-                self.ui.accept(RISK_TEXT)
+                self.ui.accept(support_notice + RISK_TEXT)
                 self.state["consent"] = {"version": RISK_VERSION, "binding": dict(self.state["binding"]),
                                          "factory_reset_and_data_loss": True, "possible_permanent_brick": True,
                                          "method": "accept_decline_buttons",
@@ -337,7 +352,7 @@ class Guide:
                 self.act(lambda r: "unlock" if r["secure_lock_state"] == 1 else (
                     "unlocked_check" if r["unlocked_on_current_boot"] else "unlock_reboot"))
             elif phase == "unlock":
-                self.ui.accept("Ready to unlock " + self.state["name"] + ".\n"
+                self.ui.accept(support_notice + "Ready to unlock " + self.state["name"] + ".\n"
                                "This will factory-reset it and erase its data. This step is performed only once.\n"
                                "Once the unlock is confirmed, this will restart the onn automatically.")
                 self.ui.say("Unlocking once and checking the result...")
@@ -411,7 +426,7 @@ class Guide:
                 self.ui.say("\nChecking the temporary system before installation...")
                 self.act("flash_consent", stage=results["root_stage"]["stage"])
             elif phase == "flash_consent":
-                self.ui.accept("Ready to install permanent root on " + self.state["name"] + ".\n"
+                self.ui.accept(support_notice + "Ready to install permanent root on " + self.state["name"] + ".\n"
                                "This will save and check the original image, install the prepared image once, and check it.\n"
                                "Once verification passes, this will restart the onn automatically.\n"
                                "This write could brick the onn. A backup does not guarantee recovery.\n"
