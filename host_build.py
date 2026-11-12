@@ -7,6 +7,7 @@ import time
 import onn2026 as o
 
 PROGRESS_PREFIX = "[build] "
+BUILD_TIMEOUT_SECONDS = 15 * 60
 CANCEL_GRACE_SECONDS = 2
 OUTPUT_TAIL_BYTES = 65536
 
@@ -33,9 +34,8 @@ def stop_process_group(process):
 def run(session, label, argv, emit=None):
     """Run one host-only build with live progress, logs and Ctrl-C cleanup.
 
-    A fixed wall-clock limit is inappropriate for CPU/disk-bound image work on
-    an unknown host. This runner is only used for local DSU building; ADB,
-    unlock, flash and reboot operations keep their existing bounded runner.
+    The entire build has a 15-minute wall-clock limit. This runner is only used
+    for local DSU building; ADB, unlock, flash and reboot timeouts are unchanged.
     """
     if emit is None:
         emit = lambda message: print(message, flush=True)
@@ -44,7 +44,7 @@ def run(session, label, argv, emit=None):
     log = session.path / (stem + ".log")
     receipt = session.path / (stem + ".json")
     record = {"at": o.now(), "argv": [str(value) for value in argv], "host_only": True,
-              "timeout_seconds": None, "timed_out": False, "interrupted": False,
+              "timeout_seconds": BUILD_TIMEOUT_SECONDS, "timed_out": False, "interrupted": False,
               "automatic_retry": False, "output_log": str(log), "returncode": None}
     o.save(receipt, record, exclusive=True)
     started = time.monotonic()
@@ -53,7 +53,11 @@ def run(session, label, argv, emit=None):
 
     def show_progress(reader, final=False):
         nonlocal pending
-        while chunk := reader.read(65536):
+        # Bound each batch so continuous output cannot starve the deadline.
+        for _ in range(16):
+            chunk = reader.read(65536)
+            if not chunk:
+                break
             pending += chunk
             lines = pending.split("\n")
             pending = lines.pop()
@@ -74,6 +78,9 @@ def run(session, label, argv, emit=None):
             # Tail a regular file so a descendant retaining stdout cannot block
             # cancellation or prevent us noticing that the builder has exited.
             while process.poll() is None:
+                if time.monotonic() - started >= record["timeout_seconds"]:
+                    record["timed_out"] = True
+                    break
                 show_progress(reader)
                 time.sleep(0.1)
             stop_process_group(process)
@@ -97,6 +104,9 @@ def run(session, label, argv, emit=None):
                 record["stdout"] = stream.read().decode(errors="replace")
             record["output_truncated"] = log.stat().st_size > OUTPUT_TAIL_BYTES
         o.save(receipt, record)
+    o.require(not record["timed_out"],
+              f"{label} timed out after {record['timeout_seconds']:g} seconds. Build output: {log}\n"
+              "The build and its tools were stopped. Keep the saved work folder to resume.")
     o.require(record["returncode"] == 0,
               f"{label} failed (exit {record['returncode']}). Build output: {log}\n"
               "This computer-only step can be rerun. Keep the saved work folder.")

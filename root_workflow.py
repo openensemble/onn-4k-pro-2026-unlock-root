@@ -168,7 +168,8 @@ def build_matches(device, build):
 def build_dsu(device, args):
     device.identify(unlocked=True)
     o.verify_files()
-    print("Preparing the temporary Android systems on this computer. Ctrl-C stops the build; the guide can resume it.", flush=True)
+    print("Preparing the temporary Android systems on this computer (15-minute build limit). "
+          "Ctrl-C stops the build; the guide can resume it.", flush=True)
     cache = o.ROOT / "cache"
     ota = o.download(o.PROFILE["ota_url"], cache / "jarvis2-15640252-full-ota.zip",
                      o.PROFILE["ota_sha256"], o.PROFILE["ota_size"])

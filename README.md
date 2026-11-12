@@ -82,13 +82,17 @@ A stock backup does not guarantee recovery. Read the [recovery details](docs/REC
 - The onn connected to a TV you can watch, its remote, and a steady power supply.
 - The computer and onn on the same trusted network.
 - Android platform-tools, Android NDK **28.2.13676358**, `erofs-utils`
-  (**1.7.1** tested), and `secilc`.
+  with directory extraction and compressed tar input (**1.7.1** tested), and `secilc`.
 
 On Debian/Ubuntu, install the host packages with:
 
 ```sh
 sudo apt-get install git python3 adb iproute2 erofs-utils secilc
 ```
+
+Some distributions supply older `erofs-utils` packages. The guide tests a small
+build and extraction before unlocking. If that check fails, follow the
+[host-tool upgrade instructions](docs/HOST_TOOLS.md).
 
 Install NDK **28.2.13676358** through Android SDK Manager. The guide looks in the
 usual SDK locations and asks for its folder if it cannot find it. It checks the
@@ -170,8 +174,9 @@ options such as a custom ADB path. Do not mix manual mutations into an active gu
 
 `build-offline-dsu` prepares the temporary Android images on your computer.
 Build time depends on CPU and storage speed. This step now shows its current
-stage and compression progress, without the old 15-minute overall or 10-minute
-per-tool cutoffs. Ctrl-C stops the build and its tools and preserves the logs.
+stage and compression progress and has a **15-minute overall limit**. A tool
+failure stops it immediately. Reaching the limit or pressing Ctrl-C stops the
+build and its tools and preserves the logs.
 
 After a failed or cancelled build, run the same guide command from the same
 checkout and keep the existing `work/` folder. The guide retries the local build
@@ -182,6 +187,10 @@ For a tool failure, the error gives its exit code and the combined
 `NNN-build-offline-dsu.log` path. The named tool log under that session's
 `dsu-build/` directory contains the tool's detailed output. Existing timeout
 receipts from older versions remain available for diagnosis.
+
+If `fsck.erofs` reports that `--extract` does not allow an argument, its version
+cannot extract files into a directory. Upgrade the computer's EROFS tools using
+[these instructions](docs/HOST_TOOLS.md), then resume the guide.
 
 ## Collect a slot-A diagnostic report
 

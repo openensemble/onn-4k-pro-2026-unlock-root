@@ -50,7 +50,7 @@ class HostBuildTests(unittest.TestCase):
         result = host_build.run(self.session, "build-offline-dsu", [sys.executable, "-u", "-c", code], emit)
         self.assertEqual(messages, ["First stage", "Second stage"])
         self.assertEqual(result["returncode"], 0)
-        self.assertIsNone(result["timeout_seconds"])
+        self.assertEqual(result["timeout_seconds"], 900)
         self.assertFalse(result["timed_out"])
         self.assertIn("private_build_receipt", Path(result["output_log"]).read_text())
         self.assertEqual(json.loads((self.session.path / "001-build-offline-dsu.json").read_text()), result)
@@ -79,6 +79,52 @@ class HostBuildTests(unittest.TestCase):
         self.assertIn("error", receipt)
         self.assertIsNone(receipt["returncode"])
         self.assertFalse(receipt["timed_out"])
+
+    def test_timeout_stops_build_and_term_ignoring_child_despite_live_progress(self):
+        marker = self.folder / "child-pid"
+        attempts = self.folder / "attempts"
+        child_code = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(30)"
+        code = ("import signal,subprocess,sys,time\nfrom pathlib import Path\n"
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                f"p=Path({str(attempts)!r}); p.write_text(p.read_text()+'x' if p.exists() else 'x')\n"
+                f"child=subprocess.Popen([sys.executable,'-c',{child_code!r}])\n"
+                f"Path({str(marker)!r}).write_text(str(child.pid))\n"
+                "while True:\n print('[build] Still running',flush=True)\n time.sleep(0.05)\n")
+        messages = []
+        started = time.monotonic()
+        try:
+            with patch.object(host_build, "BUILD_TIMEOUT_SECONDS", 0.6), \
+                 patch.object(host_build, "CANCEL_GRACE_SECONDS", 0.1):
+                with self.assertRaisesRegex(o.Stop, "timed out after 0.6 seconds"):
+                    host_build.run(self.session, "build-offline-dsu", [sys.executable, "-c", code], messages.append)
+            self.assertLess(time.monotonic() - started, 5)
+            receipt = json.loads((self.session.path / "001-build-offline-dsu.json").read_text())
+            self.assertEqual(receipt["timeout_seconds"], 0.6)
+            self.assertTrue(receipt["timed_out"])
+            self.assertFalse(receipt["interrupted"])
+            self.assertFalse(receipt["automatic_retry"])
+            self.assertEqual(attempts.read_text(), "x")
+            self.assertGreater(len(messages), 1)
+            self.assertIn("Still running", receipt["stdout"])
+            for pid in (receipt["pid"], int(marker.read_text())):
+                deadline = time.monotonic() + 2
+                while process_active(pid) and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertFalse(process_active(pid), "Timed-out build left a running process")
+        finally:
+            if marker.exists() and process_active(int(marker.read_text())):
+                os.kill(int(marker.read_text()), signal.SIGKILL)
+
+    def test_timeout_remains_failure_even_if_builder_exits_zero_on_term(self):
+        code = ("import signal,sys,time\n"
+                "signal.signal(signal.SIGTERM,lambda *_: sys.exit(0))\n"
+                "print('[build] Waiting',flush=True)\ntime.sleep(30)\n")
+        with patch.object(host_build, "BUILD_TIMEOUT_SECONDS", 0.5):
+            with self.assertRaisesRegex(o.Stop, "timed out"):
+                host_build.run(self.session, "build-offline-dsu", [sys.executable, "-c", code], lambda _: None)
+        receipt = json.loads((self.session.path / "001-build-offline-dsu.json").read_text())
+        self.assertTrue(receipt["timed_out"])
+        self.assertEqual(receipt["returncode"], 0)
 
     def test_large_output_is_preserved_on_disk_with_bounded_receipt_tail(self):
         result = host_build.run(self.session, "build-offline-dsu",

@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import connection
 import onn2026 as o
 import root_workflow as flow
+from tools.erofs_tools import check_erofs_tools
 from guide_core import (Guide as CoreGuide, Paused, UI, accepted, initial_state,
                         validate_state, working, PREVIEW, RISK_TEXT, RISK_VERSION,
                         show_debugging_setup, ask_device_name, confirm_device, show_stopped)
@@ -60,6 +61,7 @@ def host_setup(args, ui):
     missing = [name for name in ("ip", args.mkfs_erofs, args.fsck_erofs, args.secilc) if not shutil.which(name)]
     o.require(not missing, "Install these computer tools before continuing: " + ", ".join(missing) +
               ". On Debian/Ubuntu: sudo apt-get install adb iproute2 erofs-utils secilc")
+    check_erofs_tools(args.mkfs_erofs, args.fsck_erofs)
     ndk = find_ndk(args.ndk)
     if ndk is None:
         ui.page("Find the Android build tools", "The Android build tools (NDK " + o.PROFILE["ndk_version"] +

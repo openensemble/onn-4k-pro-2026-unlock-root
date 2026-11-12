@@ -218,27 +218,27 @@ completed unlock, DSU boot or permanent-root hardware validation yet.** The
 profile, guide, diagnostic output and instructions preserve this distinction.
 Offline tests do not establish physical recovery or eliminate failed-boot risk.
 
-## Offline DSU build timeout handling — November 12, 2026
+## Offline DSU host compatibility and timeout handling — November 12, 2026
 
 The reporter who confirmed a 15-character Android ID subsequently reported
-`build-offline-dsu` timing out. No exact error, command receipt, elapsed time or
-host specifications were supplied. Code inspection found a 900-second overall
-deadline and 600-second deadlines for each tool inside the DSU builder. These
-can terminate legitimate work on slower computers; the report alone does not
-identify which limit or tool was involved.
+`build-offline-dsu` timing out. Their later tool log identified an ODM extraction
+failure: `fsck.erofs` rejected the argument to `--extract`. The same diagnostic
+was reproduced with Ubuntu's erofs-utils 1.4 package. Version 1.7.1 accepts the
+builder's extraction syntax. ODM is the first stock image extracted.
 
-The workflow now supervises `build-offline-dsu` with `host_build.py`. It has no
-fixed wall-clock deadline, streams stage and compression progress, and records
+The workflow supervises `build-offline-dsu` with `host_build.py`. It enforces a
+900-second overall deadline, streams stage and compression progress, and records
 complete output in a session log with a bounded tail in the JSON receipt.
-Ctrl-C stops the build's process group, including descendant tools, and records
-the interruption. Nonzero tool exits are reported as failures with exit codes
+Timeout or Ctrl-C stops the build's process group, including descendant tools,
+and records the reason. Nonzero tool exits are reported as failures with exit codes
 and log paths. The previous device-command runner and its timeouts are unchanged.
 
 The guide already treats host builds as repeatable. It preserves previous
 sessions and retries a failed or cancelled build in a new directory, retaining
 the completed unlock and patch receipts. It does not stage partial build output.
 
-All **138 Python tests** passed, including eight new host-process tests and two
+The initial progress/cancellation update passed **138 Python tests**, including
+eight new host-process tests and two
 guide-resume regressions. These check live progress before completion, retained
 diagnostics, real command failures without retries, missing tools, bounded
 receipt output, orphaned descendants, cancellation of TERM-ignoring tools,
@@ -259,3 +259,26 @@ verified outputs byte for byte. Production UUID behavior was not changed.
 These were synthetic-device offline builds; no onn was contacted, unlocked,
 flashed or rebooted. Detailed receipts and logs are in ignored
 `work/20261112T200726Z-full-regression/`.
+
+The follow-up host compatibility change adds a tiny compressed tar build and
+file/symlink extraction check before unlocking and at the start of every offline
+build. It tests the selected binaries rather than trusting version strings or
+help text. Incompatible tools produce the actual diagnostic, their selected path
+and a link to `docs/HOST_TOOLS.md`. The requested 15-minute overall deadline is
+restored; progress output cannot reset it or keep its check from running.
+
+All **147 Python tests** and **11 native protocol scenarios** passed after this
+change. The new tests cover missing tar input, legacy extraction semantics,
+successful exits without extracted files, checks before other host/build work,
+bounded probe waits, and timeout cleanup of a build and TERM-ignoring child even
+while progress continues. A process exiting zero on termination still records a
+timeout failure. Cancellation, immediate failures and guide resume coverage
+also passed. Package hashes, syntax, CLI entry points and whitespace passed.
+
+A real offline slot-B build passed the new check and completed in 38.54 seconds
+under the 900-second supervisor. All 2,461 original paths, inode metadata, file
+contents, SELinux policy and AVB checks passed. Using the previous filesystem
+UUID only for comparison reproduced the earlier root image, both archives and
+helper byte for byte. Logs and manifests are retained in ignored
+`work/20261112T213421Z-erofs-compatibility/`; the new synthetic image payloads
+were removed after verification. No device operation was performed.

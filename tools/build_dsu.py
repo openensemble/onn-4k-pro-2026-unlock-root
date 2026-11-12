@@ -17,6 +17,7 @@ import tarfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import onn2026 as o
 from tools.erofs_metadata import Metadata
+from tools.erofs_tools import check_erofs_tools
 
 POLICY = '''
 ; DSU-only owner console; stock Android policy is not changed.
@@ -51,8 +52,8 @@ def command(argv, log, description):
     progress(description + "...")
     with Path(log).open("x") as stream:
         try:
-            # Host-only work may legitimately take longer on a slower computer.
-            # The supervising runner stops this process group on cancellation.
+            # The supervising runner enforces the overall 15-minute deadline
+            # and stops this process group on timeout or cancellation.
             subprocess.run([str(v) for v in argv], check=True, stdout=stream,
                            stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as error:
@@ -88,6 +89,8 @@ def compress(source, dest):
 
 def build(args):
     o.require(__debug__, "Python optimization disables parser assertions; omit -O")
+    progress("Checking the computer's EROFS tools...")
+    check_erofs_tools(args.mkfs_erofs, args.fsck_erofs)
     o.require(re.fullmatch(r"JUSA[A-Za-z0-9]+", args.serial), "Invalid hardware serial")
     slot = o.slot_profile({"ro.boot.slot_suffix": args.slot})
     o.require(o.PROFILE["ndk_version"] in (args.ndk / "source.properties").read_text(),
