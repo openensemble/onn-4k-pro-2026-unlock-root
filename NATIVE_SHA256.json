@@ -22,10 +22,12 @@
   "tests/test_guide.py": "30e6ee50679bd2f7ed76a4099c465e70872b3c783c585098059cf842c2d6def3",
   "tests/test_interrupts.py": "53c0a76e648677c7774967e08c78f8f495ebf6a8e1fa22e90178b9b5be5b7d62",
   "tests/test_reboots.py": "85c322c6af709d02432643a7a13999d8eb7e2a4e560f6eac858de5e17a9064cd",
+  "tests/test_slot_report.py": "2f9c3ea85772246521899c5b2660b19c2123d7bfa5f61ceefb0ef90551213081",
   "tests/test_workflow.py": "d746269515b5f17dbb54adb87ccd5247c3ec5b42548501115bd770ae213438c5",
   "tools/build_dsu.py": "e5c2b811a94117325c2541e80e9c6b48dfaaec9795d63d6b4c43174f93602854",
   "tools/build_native.py": "afc4e47bba11ecee56d8b1401da16338326db76156aa49c2934a6c3df3a49371",
   "tools/erofs_metadata.py": "418b24ea3ab8879249f83ab2b7680db44cf48f4664dc9095cbe339d42f6ccf02",
   "tools/extract_dsu_ota.py": "4923a40c7f84d38eb48a3045b7c80daba199e854d86a244b8174df852fe8296a",
-  "tools/extract_full_ota.py": "615ae835baf182d02dc90d0807b2ecd86885d9369f8312558eda26dd9d7a3c2e"
+  "tools/extract_full_ota.py": "615ae835baf182d02dc90d0807b2ecd86885d9369f8312558eda26dd9d7a3c2e",
+  "tools/slot_report.py": "3a067e951c54fc2b3790bfea2aa1fff472e95a62f6d795a0e977a8bc30014d9e"
 }

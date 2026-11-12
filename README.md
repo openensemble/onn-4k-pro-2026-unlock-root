@@ -141,6 +141,46 @@ The [advanced command reference](docs/MANUAL.md) retains the individual commands
 for inspection and reviewed manual work. Use `python3 onn2026.py --help` for
 options such as a custom ADB path. Do not mix manual mutations into an active guide.
 
+## Collect a slot-A diagnostic report
+
+For a compatibility question such as [issue #2](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2),
+run the separate read-only collector. It accepts **slot A or B**, including a
+locked 2026 `jarvis2`, without changing the installer's slot-B requirement.
+Only Python 3.10+ and Android platform-tools (`adb`) are needed; no root, NDK
+or firmware download is required.
+
+Enable debugging on the onn, then replace `ONN_IP` with its IP address:
+
+```sh
+python3 tools/slot_report.py --target ONN_IP
+```
+
+The default ADB port is 5555; use `--target ONN_IP:PORT` if needed. Accept the
+debugging prompt on that onn and rerun if the collector reports unauthorized.
+Use `--adb /path/to/adb` for a custom executable. It connects only to the address
+you specify and checks the same physical unit, firmware, slot and boot throughout
+collection. Optional `--expect-serial SERIAL` also checks the initial physical
+identity. Neither the address nor serial appears in the shareable report.
+
+The collector reads firmware and AVB properties, both slots' partition mappings,
+accessible partition sizes, available boot-control/update status, and init_boot
+hashes when ordinary shell access and the expected partition length permit it.
+Permission denials and missing tools are recorded as unavailable information.
+An unreadable partition is not evidence that the slot is damaged or unsupported.
+
+Results are saved in a new ignored `work/slot-reports/` directory:
+
+- **`slot-report.txt` or `slot-report.json`:** review and attach one to the issue.
+  These contain selected diagnostic facts, with address, serial and boot ID omitted.
+- **`private.json`:** raw command receipts containing device identifiers; keep
+  this file local. Do not attach the entire output directory.
+
+This script does not request root, install an app, write settings or firmware,
+reboot, switch slots, or run the unlock installer. A completed report means the
+collection finished; it does **not** establish that slot A is safe to unlock/root
+or that the inactive slot contains a usable installation. Leave the firmware
+profile and active slot unchanged when collecting a report.
+
 ## What was tested
 
 The underlying unlock, DSU return, DSU root console, single init_boot flash,

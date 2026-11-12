@@ -89,3 +89,35 @@ The additional naming page was checked with a custom room name and a blank
 entry; the selected name or serial was retained through installation and completion.
 The guided installer has not been used to repeat an unlock or
 flash on the already-rooted onn.
+
+## Read-only slot-report collector
+
+`tools/slot_report.py` is independent of the installer and accepts an active
+slot of A or B. Its offline tests use an allowlisted fake ADB transport; any
+unexpected device command fails the test. Run just those tests with:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_slot_report.py' -v
+```
+
+The 15 tests cover locked slot A, slot B, denied metadata access, readable
+metadata and bounded init_boot hashing, fallback size information, unexpected
+partition mappings/sizes, unavailable boot-control tools, HAL errors, a newer
+firmware report, wrong hardware, changed identity/slot/boot, authorization,
+timeouts without retry, report privacy and refusing to overwrite an existing
+output directory. Raw command receipts stay separate from shareable reports.
+
+A nonzero `bootctl is-slot-bootable` or `is-slot-marked-successful` result is
+recorded as unknown/error, not interpreted as false: the
+[Android 14 implementation](https://android.googlesource.com/platform/system/extras/+/android-14.0.0_r1/bootctl/bootctl.cpp)
+uses failure exits for both a false result and a HAL error. Missing metadata
+does not establish bootability, update completion, or installation support.
+
+On November 12, 2026, all **107 Python tests** passed, including those 15 new
+diagnostic tests. The collector also completed on a locked build-15640252
+jarvis2 running slot B. It confirmed both init_boot links and normal Android,
+reported denied size/hash access and unavailable boot-control information, and
+left the device unchanged. The generated public files were checked for absence
+of the target address, hardware serial and boot ID. Raw receipts remain in
+ignored `work/slot-reports/`. Slot-A behavior has been tested with fixtures;
+collection on real hardware actively running slot A is still untested.
