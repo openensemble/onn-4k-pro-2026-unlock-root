@@ -13,6 +13,7 @@ from unittest.mock import patch
 import connection
 import guide as g
 import onn2026 as o
+from guide_core import ROOT_ACCESS_HELP, RootAccessUnavailable
 
 BINDING = {"ro.serialno": "JUSAGUIDEONLY", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
@@ -245,6 +246,72 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.count("verify"), 2)
         self.assertEqual(self.backend.count("install"), 1)
         self.assertEqual(self.backend.count("root_boot"), 1)
+
+    def test_verification_waits_for_remote_before_first_request(self):
+        self.ui.read = lambda prompt: "q" if self.state["phase"] == "verify" else ""
+        with self.assertRaises(g.Paused):
+            self.guide.run()
+        self.assertEqual(self.state["phase"], "verify")
+        self.assertNotIn("verify", self.backend.prepared)
+        self.assertEqual(self.backend.count("cleanup"), 0)
+        messages = "\n".join(self.messages)
+        self.assertIn("Settings > Apps > See all apps > Magisk > Open", messages)
+        self.assertIn("Stay at the TV with its remote", messages)
+        self.assertIn("Superuser", messages)
+        self.ui.read = self.answer
+        self.resume().run()
+        self.assertEqual(self.backend.count("verify"), 1)
+        self.assertEqual(self.backend.count("install"), 1)
+
+    def test_permission_denial_waits_before_retry_and_keeps_history(self):
+        self.backend.failures["verify"] = RootAccessUnavailable("Magisk denied Shell root access.\n" + ROOT_ACCESS_HELP)
+        requests_at_prompt = []
+        def answer(prompt):
+            if self.state["phase"] == "verify":
+                requests_at_prompt.append(self.backend.count("verify"))
+                self.assertEqual(self.backend.count("cleanup"), 0)
+                if self.backend.count("verify") == 1:
+                    self.assertIn("Magisk denied Shell", "\n".join(self.messages))
+                    self.backend.failures.clear()
+            return ""
+        self.ui.read = answer
+        self.guide.run()
+        self.assertEqual(requests_at_prompt, [0, 1])
+        self.assertEqual(self.backend.count("verify"), 2)
+        self.assertEqual(self.state["phase"], "complete")
+        for phase in ("unlock", "unlock_reboot", "patch", "stock_stage", "stock_boot", "root_stage",
+                      "root_boot", "install", "install_reboot", "cleanup", "updates"):
+            self.assertEqual(self.backend.count(phase), 1, phase)
+        attempts = [row for row in self.state["history"] if row["phase"] == "verify"]
+        self.assertEqual(len(attempts), 2)
+        self.assertNotEqual(attempts[0]["receipt"], attempts[1]["receipt"])
+        self.assertTrue(Path(attempts[0]["receipt"]).parent.is_dir())
+        self.assertFalse(Path(attempts[0]["receipt"]).exists())
+        self.assertTrue(Path(attempts[1]["receipt"]).is_file())
+
+    def test_root_timeout_can_pause_and_resume_only_verification(self):
+        self.backend.failures["verify"] = RootAccessUnavailable("The root verification command timed out.\n" + ROOT_ACCESS_HELP)
+        self.ui.read = lambda prompt: "q" if self.backend.count("verify") == 1 else ""
+        with self.assertRaises(g.Paused):
+            self.guide.run()
+        self.assertEqual(self.state["phase"], "verify")
+        self.assertEqual(self.backend.count("verify"), 1)
+        self.assertEqual(self.backend.count("cleanup"), 0)
+        self.assertNotIn("verify", self.state["results"])
+        self.backend.failures.clear()
+        # Reopening after a missed prompt must pause again before any request.
+        before = list(self.backend.calls)
+        self.ui.read = lambda prompt: "q"
+        with self.assertRaises(g.Paused):
+            self.resume().run()
+        self.assertEqual(self.backend.calls, before)
+        self.ui.read = self.answer
+        resumed = self.resume()
+        resumed.run()
+        self.assertEqual(resumed.state["phase"], "complete")
+        self.assertEqual(self.backend.count("verify"), 2)
+        self.assertEqual(self.backend.count("install"), 1)
+        self.assertEqual(self.backend.count("install_reboot"), 1)
 
     def test_connection_failure_before_write_does_not_consume_it(self):
         self.backend.connection_failure = "install"

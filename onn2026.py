@@ -319,17 +319,30 @@ def extract_magisk(apk, directory):
                  "stub.apk", "boot_patch.sh", "util_functions.sh"]), "Incomplete Magisk inputs")
 
 
+def read_android_id(device, label):
+    """Keep the exact installation token; Android's hexadecimal long is unpadded."""
+    value = device.text(label, "settings", "get", "secure", "android_id")
+    require(value not in ("", "null"),
+            "Android installation identity unavailable: Android returned no ID. "
+            "Finish Android setup and check the saved settings-read receipt. "
+            "Keep the work folder; do not reset the onn or repeat the unlock.")
+    require(re.fullmatch(r"[0-9a-fA-F]{1,16}", value),
+            "Android installation identity unavailable: expected 1 to 16 hexadecimal "
+            f"characters; received an invalid {len(value)}-character response. "
+            "Keep the work folder and inspect the saved settings-read receipt.")
+    return value
+
+
 def prepare_root(device, stock, apk):
     props = device.identify(unlocked=True)
     state, boot = lock_state(device)
     require(state == 0, "Secure AVB unlock is not proved")
+    android_id = read_android_id(device, "android-installation-id")
     stock, apk = Path(stock), Path(apk)
     original = validate_image(stock, stock=True)
     tools = device.s.path / "patch-tools"
     extract_magisk(apk, tools)
     remote = "/data/local/tmp/onn26-patch-" + uuid.uuid4().hex
-    android_id = device.text("android-installation-id", "settings", "get", "secure", "android_id")
-    require(re.fullmatch(r"[0-9a-fA-F]{16}", android_id), "Android installation identity unavailable")
     script = f'''#!/system/bin/sh
 cd {remote} || exit 1
 [ "$(id -u)" = 2000 ] || exit 2

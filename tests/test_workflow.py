@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import onn2026 as o
 import root_workflow as flow
+from guide_core import RootAccessUnavailable
 
 BOOT = "11111111-2222-3333-4444-555555555555"
 BINDING = {"ro.serialno": "JUSA123456", "ro.product.device": o.PROFILE["device"],
@@ -64,6 +65,11 @@ def prepared_stage(directory):
 
 
 class WorkflowTests(unittest.TestCase):
+    def setUp(self):
+        guard = patch.object(o.subprocess, "run", side_effect=AssertionError("Live I/O forbidden in workflow tests"))
+        guard.start()
+        self.addCleanup(guard.stop)
+
     def test_receipt_binding_rejects_other_unit(self):
         with tempfile.TemporaryDirectory() as tmp:
             device = Device(tmp)
@@ -136,6 +142,69 @@ class WorkflowTests(unittest.TestCase):
                 with self.assertRaises(o.Stop):
                     flow.verify_root(device, SimpleNamespace(patch_result=Path("unused")))
             self.assertFalse(any(label == "verify-permanent-root" for label, _ in device.calls))
+
+    def verification_fixture(self, directory):
+        device = Device(directory)
+        receipt = {"boot_id": "prior-boot", "android_id": "1122334455667788",
+                   "patched_image": {"sha256": "a" * 64}}
+        response = {"returncode": 0, "timed_out": False, "stderr": "",
+                    "stdout": "uid=0(root) gid=0(root) context=u:r:magisk:s0\n30.7:MAGISK:R\n30700\n"
+                              "Enforcing\n" + "a" * 64 + "  /dev/block/by-name/init_boot_b\nMAGISK_ENVIRONMENT_COMPLETE\n"}
+        return device, receipt, response
+
+    def test_root_permission_denial_and_timeout_explain_how_to_retry(self):
+        responses = [
+            {"returncode": 13, "timed_out": False, "stdout": "", "stderr": "Permission denied\n"},
+            {"returncode": None, "timed_out": True, "stdout": "", "stderr": ""},
+        ]
+        for response in responses:
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as tmp:
+                device, receipt, _ = self.verification_fixture(tmp)
+                with patch.object(flow, "patch_receipt", return_value=(receipt, None)), \
+                     patch.object(device, "shell", return_value=response) as request:
+                    with self.assertRaises(RootAccessUnavailable) as stopped:
+                        flow.verify_root(device, SimpleNamespace(patch_result=Path("unused")))
+                request.assert_called_once()
+                self.assertFalse(request.call_args.kwargs["check"])
+                self.assertEqual(request.call_args.args[:3], ("verify-permanent-root", "/debug_ramdisk/su", "-c"))
+                message = str(stopped.exception)
+                for text in ("Settings > Apps > See all apps > Magisk > Open", "Superuser", "Shell", "Receipts:"):
+                    self.assertIn(text, message)
+                self.assertNotIn("No retry", message)
+                self.assertFalse((device.s.path / "root-verification.json").exists())
+
+    def test_allowed_shell_saves_full_root_proof(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            device, receipt, response = self.verification_fixture(tmp)
+            with patch.object(flow, "patch_receipt", return_value=(receipt, None)), \
+                 patch.object(device, "shell", return_value=response) as request:
+                result = flow.verify_root(device, SimpleNamespace(patch_result=Path("unused")))
+            request.assert_called_once()
+            self.assertTrue(result["root_verified"])
+            self.assertFalse(result["firmware_written"])
+            self.assertEqual(result["partition_sha256"], receipt["patched_image"]["sha256"])
+            self.assertEqual(json.loads((device.s.path / "root-verification.json").read_text()), result)
+
+    def test_invalid_root_proof_is_not_treated_as_permission_denial(self):
+        for invalid in ("hash", "selinux", "environment", "exit", "missing_su"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as tmp:
+                device, receipt, response = self.verification_fixture(tmp)
+                if invalid == "hash":
+                    response["stdout"] = response["stdout"].replace("a" * 64, "b" * 64)
+                elif invalid == "selinux":
+                    response["stdout"] = response["stdout"].replace("Enforcing", "Permissive")
+                elif invalid == "environment":
+                    response["stdout"] = response["stdout"].replace("MAGISK_ENVIRONMENT_COMPLETE", "")
+                elif invalid == "exit":
+                    response.update(returncode=1, stderr="could not finish\n")
+                else:
+                    response.update(returncode=127, stdout="", stderr="/debug_ramdisk/su: not found\n")
+                with patch.object(flow, "patch_receipt", return_value=(receipt, None)), \
+                     patch.object(device, "shell", return_value=response):
+                    with self.assertRaises(o.Stop) as stopped:
+                        flow.verify_root(device, SimpleNamespace(patch_result=Path("unused")))
+                self.assertNotIsInstance(stopped.exception, RootAccessUnavailable)
+                self.assertFalse((device.s.path / "root-verification.json").exists())
 
 
 if __name__ == "__main__":

@@ -94,6 +94,17 @@ python3 onn2026.py
 
 Follow the script's on-screen instructions to complete each step.
 
+When it asks you to open Magisk, use **Settings > Apps > See all apps > Magisk >
+Open** on the TV. Magisk may not appear in Google TV's regular app list.
+Finish its additional setup and restart, then stay at the TV with the remote
+before starting root verification. Select **Grant** for **Shell** when prompted.
+
+If you miss the prompt, Magisk can remember a denial. Open Magisk's **Superuser**
+screen and allow **Shell**, or remove only Shell's saved entry to request a fresh
+prompt. The guide waits for Enter before the first check and each permission
+retry. You can also type `q`, rerun `python3 onn2026.py`, and select the same onn
+to resume verification. An existing grant can pass without another TV prompt.
+
 ## Leaving and returning
 
 Type **q** at a prompt to leave. To return, run `python3 onn2026.py` again and
@@ -200,9 +211,6 @@ responses. See the
 
 ## What was not tested
 
-- The complete guided installer on a real device from start to finish. The
-  already-rooted unit was not unlocked or flashed again to test the packaged workflow.
-- The new automatic restart and reconnect logic under real network conditions.
 - Recovery after a power loss or an unbootable modified `init_boot` image.
 
 Passing the tests does not guarantee bug-free behavior or recovery from a failed

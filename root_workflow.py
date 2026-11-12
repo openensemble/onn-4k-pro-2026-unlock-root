@@ -14,6 +14,7 @@ import urllib.request
 import uuid
 
 import onn2026 as o
+from guide_core import MAGISK_OPEN, ROOT_ACCESS_HELP, RootAccessUnavailable
 
 COMMANDS = {"build-dsu", "stage-dsu", "dsu-status", "boot-dsu", "confirm-stock-return",
             "install-root", "verify-root", "cleanup-root", "disable-updates", "updates-status", "enable-updates"}
@@ -193,8 +194,7 @@ def stage_dsu(device, args):
         o.require(current == "installed\ndisabled", "Expected the disabled rehearsal DSU")
     device.identify(unlocked=True)
     boot = device.boot_id()
-    android_id = device.text("original-android-id", "settings", "get", "secure", "android_id")
-    o.require(re.fullmatch(r"[0-9a-f]{16}", android_id), "Android identity unavailable")
+    android_id = o.read_android_id(device, "original-android-id")
     if args.kind == "root":
         o.require(android_id == rehearsal["android_id"], "Original Android installation changed")
     archive = Path(build[args.kind + "_gzip"])
@@ -383,7 +383,8 @@ def install_root(device, args):
     record.update(readback=readback, verified_flash=True)
     o.save(device.s.path / "install-result.json", record, exclusive=True)
     return {**record, "install_result": str(device.s.path / "install-result.json"),
-            "next": "Reboot normally once, open Magisk, grant Shell and finish its additional setup. Then verify-root."}
+            "next": "Reboot normally once. " + MAGISK_OPEN +
+                    " Finish Magisk's additional setup and its restart, then run verify-root and grant Shell access."}
 
 
 def verify_root(device, args):
@@ -398,12 +399,21 @@ def verify_root(device, args):
                "sha256sum /dev/block/by-name/init_boot_b; "
                "test -s /data/adb/magisk/busybox; test -s /data/adb/magisk/magiskboot; "
                "test -s /data/adb/magisk/magisk; echo MAGISK_ENVIRONMENT_COMPLETE")
-    result = root(device, "verify-permanent-root", command, helper="/debug_ramdisk/su", timeout=35)
+    result = root(device, "verify-permanent-root", command, helper="/debug_ramdisk/su", timeout=35, check=False)
+    receipts = "\nReceipts: " + str(device.s.path)
+    if result["timed_out"]:
+        raise RootAccessUnavailable("The root verification command timed out. Root has not been verified.\n\n"
+                                    + ROOT_ACCESS_HELP + receipts)
+    if (result["returncode"] != 0 and "uid=0(root)" not in result["stdout"] and
+            (result["returncode"] == 13 or "Permission denied" in result["stderr"] + result["stdout"])):
+        raise RootAccessUnavailable("Magisk denied Shell root access. Root has not been verified.\n\n"
+                                    + ROOT_ACCESS_HELP + receipts)
+    o.require(result["returncode"] == 0, "Root verification command failed. Inspect the saved command output." + receipts)
     lines = result["stdout"].splitlines()
     o.require("uid=0(root)" in result["stdout"] and "u:r:magisk:s0" in result["stdout"] and
               "30.7:MAGISK:R" in lines and "30700" in lines and "Enforcing" in lines and
               patch["patched_image"]["sha256"] + "  /dev/block/by-name/init_boot_b" in lines and
-              "MAGISK_ENVIRONMENT_COMPLETE" in lines, "Permanent root/environment verification failed")
+              "MAGISK_ENVIRONMENT_COMPLETE" in lines, "Permanent root/environment verification failed" + receipts)
     report = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": aid,
               "root_verified": True, "magisk_version": "30.7", "selinux_enforcing": True,
               "partition_sha256": patch["patched_image"]["sha256"], "environment_complete": True,

@@ -121,3 +121,51 @@ left the device unchanged. The generated public files were checked for absence
 of the target address, hardware serial and boot ID. Raw receipts remain in
 ignored `work/slot-reports/`. Slot-A behavior has been tested with fixtures;
 collection on real hardware actively running slot A is still untested.
+
+## Android installation-ID validation
+
+The Android 14
+[SettingsProvider implementation](https://android.googlesource.com/platform/frameworks/base/+/android-14.0.0_r1/packages/SettingsProvider/src/com/android/providers/settings/SettingsProvider.java)
+generates the secure Android ID with `Long.toHexString`, which does not pad
+leading zeroes. Both root preparation and DSU staging now use a shared reader
+that accepts 1–16 hexadecimal characters, preserves the exact string, and
+rejects missing or malformed responses. It does not generate or change IDs.
+
+Five regression tests reproduce the previous short-ID rejection in both
+paths, check exact receipt preservation, stop missing/invalid IDs before
+staging, and retain the mismatch guard when a short installation ID changes.
+These tests use fake device interfaces and forbid live subprocess calls.
+All **112 Python tests** passed after the fix on November 12, 2026, and the
+packaged-input hash verification passed. The reporting user's actual ID/output
+has not been supplied, so the regression reproduces a possible cause rather
+than confirming the cause on their unit. No live unlock, DSU boot or root flash
+was performed for this change.
+
+## Magisk launch and verification retry
+
+The walkthrough gives the Google TV Settings path for opening Magisk and waits
+for the owner to be at the TV before requesting root. Magisk 30.7's
+[request timer](https://github.com/topjohnwu/Magisk/blob/v30.7/app/apk/src/main/java/com/topjohnwu/magisk/ui/surequest/SuRequestViewModel.kt)
+denies unanswered requests, and its
+[request handler](https://github.com/topjohnwu/Magisk/blob/v30.7/app/core/src/main/java/com/topjohnwu/magisk/core/su/SuRequestHandler.kt)
+can save that policy. The retry screen explains how to allow Shell or remove
+its saved entry using Magisk. It does not edit Magisk's policy database.
+
+Six regression tests cover readiness before the first request, denial followed
+by an explicit retry, leaving and resuming after a timeout, preserved attempt
+history, successful verification, and rejection of incomplete or incorrect
+root proof. The denial fixture matches a saved command result: exit 13,
+`Permission denied`, and no transport timeout. A retry repeats the read-only
+verification step; uncertain writes and restarts remain blocked from replay.
+The full Python suite and packaged-input hash verification passed on November
+12, 2026.
+
+A subsequent authorized read-only check on the recovered original unit passed
+with Magisk 30.7, UID 0, SELinux Enforcing, complete runtime files and the exact
+on-target patched init_boot hash. The original Android installation and the
+Magisk setup restart were also confirmed. Its temporary system remained
+installed and disabled; this check did not perform cleanup, flash or reboot.
+The permission retry screen itself was tested offline with simulated responses.
+The owner then resumed the guide to completion. A final independent read-only
+check confirmed normal Android with DSU removed and automatic system updates
+disabled. No assistant-run install or restart was needed for this troubleshooting.

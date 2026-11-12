@@ -12,6 +12,10 @@ class Stop(RuntimeError):
     pass
 
 
+class RootAccessUnavailable(Stop):
+    """A read-only root request needs the user's attention before another check."""
+
+
 def require(condition, message):
     if not condition:
         raise Stop(message)
@@ -40,6 +44,16 @@ DEBUGGING_SETUP = (
     "5. Turn on Wi-Fi debugging (sometimes named Network or Wireless debugging).\n\n"
     "Keep the onn and this computer on the same network.\n"
     "When the TV asks, allow this computer's debugging connection."
+)
+MAGISK_OPEN = (
+    "On the TV, open Settings > Apps > See all apps > Magisk > Open.\n"
+    "Magisk may not appear in the regular Google TV app list."
+)
+ROOT_ACCESS_HELP = (
+    MAGISK_OPEN + "\n\n"
+    "If a previous root prompt expired or no prompt appears, open Magisk's Superuser screen.\n"
+    "Find Shell and allow its root access. To get a fresh prompt instead, remove only Shell's saved entry.\n"
+    "If Shell is already allowed, verification can succeed without another prompt."
 )
 PHASES = (
     "consent", "host", "baseline", "unlock", "unlock_reboot", "unlock_return", "debugging_after_unlock", "unlocked_check", "fetch", "patch", "build",
@@ -282,6 +296,25 @@ class Guide:
             raise Paused()
         return result
 
+    def verify(self):
+        message = ("Stay at the TV with its remote before starting this check.\n"
+                   "Magisk's permission prompt expires quickly. Select Grant for Shell when it appears.\n\n"
+                   + ROOT_ACCESS_HELP)
+        while True:
+            self.ui.wait(message, title=PAGE_TITLES["verify"])
+            self.ui.say("Checking permanent root. Watch the TV and grant Shell access if asked...")
+            try:
+                results = self.state["results"]
+                self.act("cleanup", patch_result=results["patch"]["patch_result"],
+                         before=results["normal_check"]["boot_id"])
+                return
+            except RootAccessUnavailable as error:
+                # Only this read-only request can return here. Keep every failed
+                # session and history entry; the next request waits for Enter.
+                self.recover_pending()
+                message = (str(error) + "\n\nAfter checking Shell's permission, press Enter to retry verification.\n"
+                           "This repeats only the root check. You can also type q and resume later.")
+
     def run(self):
         self.ui.device_label = self.state["name"] + " | serial " + self.state["binding"]["ro.serialno"]
         self.ui.page("Continue your walkthrough")
@@ -407,13 +440,12 @@ class Guide:
                 self.ui.say("\nConfirming that the original Android has returned...")
                 self.act("magisk_setup", patch_result=results["patch"]["patch_result"], install=results["install"])
             elif phase == "magisk_setup":
-                self.ui.wait("Open Magisk on the TV. Accept its 'Requires additional setup' message and let it restart.\n"
-                             "When Android returns, open Magisk again. Allow root access for Shell if requested.\n"
+                self.ui.wait(MAGISK_OPEN + "\n\nAccept its 'Requires additional setup' message and let it restart.\n"
+                             "When Android returns, use the same Settings path to open Magisk again.\n"
                              "If that setup restart already finished, continue without repeating it.")
                 self.advance("verify")
             elif phase == "verify":
-                self.ui.say("\nChecking permanent root after the Magisk setup restart. Allow Shell on the TV if asked...")
-                self.act("cleanup", patch_result=results["patch"]["patch_result"], before=results["normal_check"]["boot_id"])
+                self.verify()
             elif phase == "cleanup":
                 self.ui.say("\nRoot is verified. Saving the stock backup and removing the temporary Android system...")
                 self.act("updates", install_result=results["install"]["install_result"])

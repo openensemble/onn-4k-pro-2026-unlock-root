@@ -110,6 +110,22 @@ Throughout this walkthrough, replace `REPLACE_WITH_...` with the exact path
 printed by the preceding command. Receipt paths are deliberately explicit so
 one device’s files cannot silently be used for another device.
 
+If root preparation reports **Android installation identity unavailable**, the
+read of `settings get secure android_id` did not pass validation. This check
+comes after unlock verification and before root-image patching or flashing.
+An earlier release incorrectly required exactly 16 hexadecimal characters;
+Android's ID can legitimately have fewer because its hexadecimal representation
+is not padded. Root preparation and DSU staging now accept 1–16 hexadecimal
+characters and preserve the exact value for later installation comparisons.
+
+An empty or `null` ID still stops the workflow. Complete Android setup and
+inspect the session's `android-installation-id` command receipt, preserving
+the existing `work/` folder. Report whether the value is missing, hexadecimal,
+and its character count; the ID itself does not need to be posted publicly.
+Do not set a replacement ID, factory-reset the onn, or repeat the unlock to
+work around this check. Without the receipt, this error alone does not establish
+that a short ID caused a particular user's failure.
+
 **3. Build the stock rehearsal and root DSU images.**
 
 ```sh
@@ -203,16 +219,29 @@ disconnect and reconnect power once. After normal Android returns, reconnect:
 onn26 reconnect --scan-lan
 ```
 
-Open the Magisk app on the TV. Grant **Shell** root access if prompted. Accept
-Magisk’s **Requires additional setup** dialog and allow its setup reboot to
-finish. Run `onn26 reconnect --scan-lan` again.
+On the TV, use **Settings > Apps > See all apps > Magisk > Open**. Magisk may not
+appear in Google TV's regular app list. Accept Magisk’s **Requires additional
+setup** dialog and allow its setup reboot to finish. Run `onn26 reconnect
+--scan-lan` again. Open Magisk through the same Settings path after the reboot.
 
 **8. Verify permanent root and remove the test guest.**
+
+Stay at the TV with the remote before running verification. Select **Grant** for
+**Shell** when Magisk asks; its prompt has a short countdown. If a previous
+request expired or no prompt appears, open Magisk's **Superuser** screen and
+allow **Shell**. Alternatively, remove only Shell's saved entry there to get a
+fresh request. An existing grant can pass without another prompt.
 
 ```sh
 onn26 verify-root --patch-result "$ONN26_PATCH"
 onn26 cleanup-root --install-result "$ONN26_INSTALL"
 ```
+
+Run `cleanup-root` only after `verify-root` succeeds. A denied or timed-out
+verification can be rerun after checking Shell's permission; keep the existing
+patch receipt and work folder. In the guided walkthrough, Enter retries this
+read-only check, and `q` leaves it ready to resume. Installation and restart
+steps are not repeated to recover a missed permission prompt.
 
 Verification requires original Android, Magisk **30.7 / 30700**, UID **0**,
 SELinux **Enforcing**, complete Magisk runtime files and the exact patched
