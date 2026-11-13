@@ -40,7 +40,8 @@ onn26 reconnect --scan-lan
 ```
 
 This first checks the saved address and existing network ADB connections. If
-needed, it searches port 5555 on up to four active private LAN `/24` networks
+needed, it checks mDNS connection advertisements and port 5555 at the saved IP.
+With `--scan-lan`, it then searches port 5555 on up to four active private LAN `/24` networks
 (or smaller subnets). Common VPN and virtual interfaces are excluded. Only
 authorized devices have their properties read. A matching serial, firmware,
 bootloader and slot must be found and checked again before the address is saved.
@@ -56,6 +57,11 @@ connection file. It never replays an unlock, flash or reboot. Normal commands
 stop when disconnected; reconnect is an explicit step, not a background retry.
 After reconnecting, continue with the documented verification step. Preserve all
 attempt records, especially after an uncertain write.
+
+For abandoned temporary-system setup before a firmware write, use
+`python3 onn2026.py --connection "$ONN26_CONNECTION" guide --restart-dsu`.
+This opens the guided removal/restart prompt and preserves the manual receipts.
+See [the recovery requirements](RECOVERY.md#abandoning-temporary-system-setup-before-a-firmware-write).
 
 A household can process multiple supported **2026** units **one at a time**.
 Register each at its own initial address with a distinct name, for example:
@@ -80,13 +86,20 @@ The older 2024 onn uses its separate installer.
 **1. Unlock once.** If `status` reports trusted state 0 and
 `unlocked_on_current_boot: true`, skip the unlock write. Otherwise:
 
+**Unlocking requires a factory reset in Android Recovery on the TV. This erases
+all user apps, accounts, settings and other data stored on the onn.** Back up
+anything you want to keep before accepting data loss.
+
 ```sh
 onn26 unlock --accept-data-loss
 ```
 
 After a reported successful write, perform one normal restart from the TV.
-Complete Android setup after the reset, re-enable Developer mode, USB debugging
-and Wi-Fi/network debugging, and reconnect ADB.
+In Android Recovery, select the factory reset option and confirm the data wipe
+using its on-screen controls. After the reset, reboot into Android if prompted.
+If the reset has already completed, continue with Android setup. Connect Ethernet
+or Wi-Fi, re-enable Developer mode, USB debugging and Wi-Fi/network debugging,
+and reconnect ADB.
 Run `onn26 reconnect --scan-lan`, then `onn26 status` again. Require trusted state **0**, flash lock **0**, vbmeta
 **unlocked**, verified boot **orange**, and completed Android boot. The unlock
 command never retries its write and never reboots automatically.
@@ -140,7 +153,10 @@ SELinux labels and capabilities, verifies the rebuilt filesystem, and compiles
 the combined SELinux policy. Only the helper’s DSU domain is permissive; global
 SELinux enforcement is not disabled. The helper never starts automatically.
 
-**4. Prove that a stock DSU returns to original Android.**
+**4. First DSU boot: test that temporary Android starts and original Android returns.**
+
+This is a test boot. Root is not installed here. After the power cycle and return
+check below, you will start a second DSU boot for root installation in step 5.
 
 ```sh
 onn26 stage-dsu --build "$ONN26_BUILD" --kind stock
@@ -158,9 +174,9 @@ onn26 boot-dsu --stage "$ONN26_STOCK_STAGE"
 
 The command enables **one** DSU boot and requests **one** reboot. ADB may time
 out because the device is restarting; that is not a reason to repeat the
-command. Once the TV reaches the separate setup screen, disconnect power and
-reconnect it once. The original Android installation should return. Reconnect
-ADB, then record those observations:
+command. Once the TV reaches the separate setup screen, skip setup, sign-in and
+debugging settings. Disconnect power and reconnect it once. The original Android
+installation should return. Reconnect ADB, then record those observations:
 
 ```sh
 onn26 reconnect --scan-lan
@@ -171,7 +187,7 @@ ONN26_REHEARSAL="work/REPLACE_WITH_RETURN_SESSION/stock-return.json"
 The command checks the original Android ID, a changed boot ID and disabled DSU
 state. This demonstrates the DSU fallback, not recovery from a bad init_boot.
 
-**5. Start the root DSU for one boot.**
+**5. Second DSU boot: start the root installation system.**
 
 ```sh
 onn26 stage-dsu --build "$ONN26_BUILD" --kind root --rehearsal "$ONN26_REHEARSAL"
@@ -185,10 +201,16 @@ After `installed_disabled_verified: true`:
 onn26 boot-dsu --stage "$ONN26_ROOT_STAGE"
 ```
 
-At the separate setup screen, connect the onn to Wi-Fi again. Its IP address
-may change. Run `onn26 reconnect --scan-lan` to find the saved unit again. The
-included public key authorizes your computer. Keep the same connection file;
-do not register a new device just because its IP changed.
+This is the **second** temporary boot, used for root installation; stay in it and
+leave the power on. Pair the remote if needed and connect Ethernet or Wi-Fi. The
+root DSU already starts ADB on port 5555 and includes this computer's public key.
+Try this prepared connection before opening debugging settings or signing in to
+Google; Google account setup is not a step in this procedure. Its IP address may
+change. Run `onn26 reconnect --scan-lan` to find the saved unit again. Discovery
+also checks mDNS connection ports before scanning port 5555. If a Wireless
+debugging connection needs pairing, use `adb pair IP:PAIRING_PORT`, then
+`onn26 reconnect --candidate IP:CONNECTION_PORT`. The two ports are different.
+Keep the same connection file; do not register a new device because its IP changed.
 
 **6. Install permanent Magisk.** This is the firmware-writing step. The stock
 DSU return test does not remove the remaining init_boot recovery risk.
@@ -207,8 +229,8 @@ flushes it, reads it back independently,
 and removes the flasher. It does not write another slot, vbmeta or bootloader,
 and does not install a script at boot.
 
-Slot B has hardware-verified unlock and root. Slot A is implemented but awaits
-a successful complete hardware run. The selected slot comes from the device's
+Both slots have successful unlock and root results: community reports for slot A
+and measured hardware verification for slot B. The selected slot comes from the device's
 saved identity, including when building the DSU helper. The standalone offline
 builder requires an explicit `--slot _a` or `--slot _b`; the workflow supplies
 the verified slot automatically. The active partition's exact mapping, size and

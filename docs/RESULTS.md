@@ -33,3 +33,10 @@ unlock. The DSU/root installation later preserved the original Android identity.
 Personal identifiers and raw receipts stay outside this repository. The exact
 supported build is deliberately narrow; one unit does not establish support for
 other Android versions or hardware sold under a similar name.
+
+## Community slot-A results — November 13, 2026
+
+The project maintainer confirmed successful community unlock and root
+installations on active slot A for the supported firmware. The profile, guide
+and diagnostic status now reflect these results. The measured slot-B results
+above remain the project's earlier direct hardware verification.

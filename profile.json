@@ -8,8 +8,8 @@
       "id": "jarvis2-15640252-a",
       "root_partition": "init_boot_a",
       "root_block_path": "/dev/block/mmcblk0p22",
-      "root_method_hardware_verified": false,
-      "unlock_hardware_verified": false
+      "root_method_hardware_verified": true,
+      "unlock_hardware_verified": true
     },
     "_b": {
       "id": "jarvis2-15640252-b",

@@ -1,6 +1,5 @@
 """Live-device adapters for the shared guided walkthrough."""
 import base64
-import fcntl
 import hashlib
 import json
 import os
@@ -14,10 +13,11 @@ import sys
 from types import SimpleNamespace
 
 import connection
+import dsu_recovery
 import onn2026 as o
 import root_workflow as flow
 from tools.erofs_tools import check_erofs_tools
-from guide_core import (Guide as CoreGuide, Paused, UI, accepted, initial_state,
+from guide_core import (Guide as CoreGuide, Paused, UI, TemporarySystemPresent, accepted, initial_state,
                         validate_state, working, PREVIEW, RISK_TEXT, RISK_VERSION,
                         show_debugging_setup, ask_device_name, confirm_device, show_stopped)
 
@@ -107,15 +107,21 @@ class Backend:
             try:
                 found = connection.reconnect(device, self.path, candidate=candidate, scan_lan=candidate is None)
                 if found["ip_changed"]:
-                    self.ui.say("Found your same onn at its new address: " + found["target"])
+                    self.ui.say("Found your same onn at its new address: " + (found.get("network_address") or found["target"]))
                 if self.ui.title != task_title:
                     self.ui.page(task_title, "The selected onn is connected. Continuing this step...")
                 return SimpleNamespace(s=session, device=device)
             except (o.Stop, OSError, ValueError) as error:
                 self.ui.page("Reconnect your onn", "The selected onn could not be reached and verified.\n"
+                             "The installation image normally starts network debugging automatically on port 5555.\n"
+                             "Try its current IP:5555 once the network is connected. If that fails:\n"
                              "Check Developer mode, USB debugging and Wi-Fi/network debugging.\n"
+                             "Wireless debugging can use a new connection port after each reboot.\n"
+                             "If pairing is required, choose 'Pair device with pairing code' on the TV,\n"
+                             "then run adb pair IP:PAIRING_PORT in another terminal and enter the code.\n"
+                             "Use IP:CONNECTION_PORT from the main Wireless debugging screen here.\n"
                              "Accept this computer on the TV if asked.\n\nConnection details: " + str(error))
-                value = self.ui.ask("Press Enter to look again, enter its new IP address, or q to leave: ")
+                value = self.ui.ask("Press Enter to look again, enter its new IP:port, or q to leave: ")
                 candidate = connection.network_target(value) if value else None
 
     def invoke(self, phase, context, values):
@@ -127,11 +133,14 @@ class Backend:
             return host_setup(self.args, self.ui)
         if phase in ("baseline", "unlocked_check"):
             result = o.status(device)
-            o.require(flow.state(device) == "normal", "The onn already has a temporary Android installation. Preserve its records.")
+            if flow.state(device) != "normal":
+                raise TemporarySystemPresent("The onn already has a temporary Android installation. " + dsu_recovery.HINT)
             if phase == "baseline":
                 root = device.shell("existing-root", "test", "-x", "/debug_ramdisk/su", check=False)
                 o.require(root["returncode"] == 1 and not root["timed_out"],
                           "Root is already present, or could not be checked. This guide will not reinstall over it.")
+                if dsu_recovery.downloads(device):
+                    raise TemporarySystemPresent("Temporary-system uploads from earlier work are still present. " + dsu_recovery.HINT)
                 space = device.text("free-space", "df", "-k", "/data").splitlines()[-1].split()
                 o.require(len(space) >= 4 and space[3].isdigit() and int(space[3]) >= 8 * 1024 ** 2,
                           "Free at least 8 GiB on the onn before continuing.")
@@ -160,6 +169,7 @@ class Backend:
         if phase == "root_ready":
             stage = flow.read(args.stage)
             flow.bound(device, stage)
+            dsu_recovery.check_stage(device, stage)
             o.require(stage["kind"] == "root" and flow.state(device) == "running\ninstalled\ndisabled"
                       and device.boot_id() != stage["boot_id"], "The expected one-boot temporary system is not ready.")
             return {"temporary_system_ready": True}
@@ -211,7 +221,9 @@ def select_connection(args, ui):
             device = o.Device(session, target, args.adb)
             session.run("adb-connect", [device.adb, "connect", target], timeout=5, check=False)
             current = connection.adb_devices(session.run("adb-devices", [device.adb, "devices", "-l"], timeout=5)["stdout"])
-            o.require(current.get(target) == "device", "Accept this computer's debugging request on the TV first.")
+            device.target = connection.connected_target(device, current, target)
+            device.network_address = target
+            o.require(current.get(device.target) == "device", "Accept this computer's debugging request on the TV first.")
             props = device.identify()
             break
         except (o.Stop, OSError, ValueError) as error:
@@ -235,32 +247,47 @@ def start(args, ui=None):
         o.require(shutil.which(args.adb or "adb"), "ADB is missing. Install Android platform-tools or use --adb /path/to/adb.")
         args.work = args.work.resolve()
         args.work.mkdir(parents=True, exist_ok=True)
-        # The cache belongs to this checkout, even when a custom receipts folder is used.
-        lock_directory = o.ROOT / "work"
-        lock_directory.mkdir(parents=True, exist_ok=True)
-        with (lock_directory / "guide.lock").open("a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise o.Stop("Another guide is already open. Use that window or finish it before starting another.") from None
+        with o.operation_lock(args.work):
             ui.page("Get started", "This will run the commands and keep track of the files. Keep the TV where you can see it.")
             selected = select_connection(args, ui)
             record = connection.load(selected)
             directory = args.work / "devices" / hashlib.sha256(record["binding"]["ro.serialno"].encode()).hexdigest()
             path = directory / "guide.json"
+            restarting = args.restart_dsu or bool(dsu_recovery.pending(directory))
             if path.exists():
                 state = load_state(path, record)
-                o.require(Path(state["connection_file"]).resolve() == selected.resolve(),
-                          "Saved progress uses another connection file; select its original saved device.")
+                o.require(restarting or Path(state["connection_file"]).resolve() == selected.resolve(),
+                          "Saved progress uses another connection file; select its original saved device. " + dsu_recovery.HINT)
                 ui.say("Resuming this onn's saved progress.")
             else:
-                o.require(not list(directory.glob("*-attempt.json")),
-                          "This onn has records from earlier work outside the guide. Preserve those records; do not start over.")
+                attempts = list(directory.glob("*-attempt.json"))
+                if attempts and all(p.name.startswith("dsu-") for p in attempts):
+                    restarting = True
+                o.require(restarting or not attempts,
+                          "This onn has records from earlier work outside the guide. " + dsu_recovery.HINT)
                 state = initial_state(record, selected)
-            guide = Guide(path, state, Backend(args, selected, ui), ui)
-            guide.persist()
-            guide.run()
-            return 0
+            backend = Backend(args, selected, ui)
+            if not restarting and path.exists() and state["phase"] in dsu_recovery.RESTART_PHASES:
+                ui.page("Continue or restart temporary setup", "Your previous progress and backups are saved.\n"
+                        "Press Enter to continue. R removes the temporary system and starts its setup again.")
+                while True:
+                    choice = ui.ask("Enter to continue, R to remove and start again, or q to leave: ").lower()
+                    if choice in ("", "r"):
+                        restarting = choice == "r"
+                        break
+            while True:
+                if restarting:
+                    state = dsu_recovery.restart(backend, path, state, record, selected, ui)
+                guide = Guide(path, state, backend, ui)
+                guide.persist()
+                try:
+                    guide.run()
+                    return 0
+                except TemporarySystemPresent as error:
+                    ui.say(str(error))
+                    # The restart path inspects the device, then asks explicit
+                    # consent before any cleanup. No failed action is replayed.
+                    restarting = True
     except (Paused, KeyboardInterrupt):
         show_stopped(ui)
         if path:
@@ -276,6 +303,8 @@ def start(args, ui=None):
 def add_parser(sub):
     parser = sub.add_parser("guide", help="Complete guided unlock-to-root walkthrough; manages commands and files for you")
     parser.add_argument("--preview", action="store_true", help="Explain the steps without device access")
+    parser.add_argument("--restart-dsu", action="store_true",
+                        help="Review removal of temporary Android/uploads and start again; keep prior records and backups")
     parser.add_argument("--ndk", type=Path, help="Optional NDK folder; otherwise detected or requested")
     parser.add_argument("--adb-public-key", type=Path, default=Path.home() / ".android/adbkey.pub")
     parser.add_argument("--mkfs-erofs", default="mkfs.erofs")

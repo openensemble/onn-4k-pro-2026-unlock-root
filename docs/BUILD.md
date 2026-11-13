@@ -213,9 +213,11 @@ Raw community reports, build receipts and logs remain in ignored `work/`.
 Bulky synthetic-device test images were discarded after verification; their
 hashes and build logs were retained. No test image was staged or installed.
 
-**Slot B retains its earlier hardware-verified method status. Slot A has no
-completed unlock, DSU boot or permanent-root hardware validation yet.** The
-profile, guide, diagnostic output and instructions preserve this distinction.
+At this initial November 12 validation, slot B had measured hardware results
+and slot A had only diagnostic and offline coverage. On November 13, the project
+maintainer confirmed successful community slot-A unlock/root installations;
+the profile, guide and diagnostic status now reflect those reports. See
+[the community results update](RESULTS.md#community-slot-a-results--november-13-2026).
 Offline tests do not establish physical recovery or eliminate failed-boot risk.
 
 ## Offline DSU host compatibility and timeout handling — November 12, 2026
@@ -282,3 +284,104 @@ UUID only for comparison reproduced the earlier root image, both archives and
 helper byte for byte. Logs and manifests are retained in ignored
 `work/20261112T213421Z-erofs-compatibility/`; the new synthetic image payloads
 were removed after verification. No device operation was performed.
+
+## Temporary-system restart and reconnection — November 13, 2026
+
+[Issue #3](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/3)
+reported interrupted uploads, installed DSU leftovers, consumed staging journals,
+wireless-debugging port changes, and confusion between the two temporary boots.
+The guide now offers a confirmed removal/restart, also available through
+`guide --restart-dsu`. It retains old journals and snapshots the guide state,
+then selects fresh DSU attempt records only after verified cleanup. Firmware
+attempt records remain global to the device. Old stage/rehearsal receipts cannot
+authorize operations after their DSU cycle is retired.
+
+All **179 Python tests** and **11 native protocol scenarios** passed. The new
+coverage exercises partial uploads, absent host receipts, decline, both slots,
+wrong device/slot/Android identity, changed boots/files, symlinks, firmware-write
+attempts, running/enabled guests, unresolved reboots, wipe timeout/incomplete
+removal, connection loss, host-update interruption, preserved backups/history,
+retired receipts, and fresh upload/rehearsal/root-guest boot after removal.
+Guide entry tests cover the explicit flag, the R menu, automatic leftover
+prompts, and pending recovery. Reconnection tests cover mDNS connection ports,
+excluded pairing ports, identity ambiguity, fallback when multicast fails, and
+the root DSU's prepared port 5555 at the saved IP. These fixtures forbid live
+ADB/subprocess/network access; the existing flash tests use regular files.
+
+The installation image already includes `adb_keys` and an init action starting
+ADB on port 5555. Debugging settings/pairing guidance remains a reconnection
+fallback. The stock rehearsal requires observing setup on the TV and verifying
+original Android after its return, without ADB inside that first guest.
+
+Removal behavior was checked against Android 14's
+[gsi_tool](https://android.googlesource.com/platform/system/gsid/+/refs/tags/android-14.0.0_r1/gsi_tool.cpp)
+and [GSI service](https://android.googlesource.com/platform/system/gsid/+/refs/tags/android-14.0.0_r1/gsi_service.cpp):
+wipe from original Android clears the installer and removes its backing files;
+the running-guest deferred-removal path is refused by this workflow. The DSU
+installer process is stopped first so its asynchronous work cannot continue
+using the archives being removed. ADB discovery follows the documented
+[connection and pairing service types](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/dev/adb_wifi.md).
+
+Receipts are in ignored `work/issue-3-recovery-research/`. No physical device was
+contacted and no firmware/image build inputs changed. Recovery and wireless
+rediscovery still need confirmation on hardware, including WSL2 networking.
+
+## Full restart-feature review — November 13, 2026
+
+The review reproduced and fixed six problems in the pending recovery changes:
+
+- Wireless ADB could list an authorized paired device by its TLS connection
+  service name, which discovery previously ignored. Existing service transports
+  and explicit IP/port connections now resolve to the actual ADB target, with
+  the physical-device binding checked again before saving it. A saved IP remains
+  available for the root image's port-5555 fallback.
+- An interrupted write to the cleanup completion receipt could leave partial
+  JSON that prevented recovery. Completion now publishes a fully written receipt
+  atomically without replacing any existing receipt.
+- A changed fresh-guide template could be adopted during pending recovery. Its
+  hash and fresh-state fields are now checked before cleanup and host activation.
+- Missing active-cycle metadata could allow legacy receipts to appear current.
+  Completed restart evidence now prevents that fallback.
+- Separate checkouts sharing a work folder, and manual modifying commands, did
+  not share the guide's lock. Both receipt storage and the checkout's cache now
+  remain locked throughout modifying operations.
+- Moving the preserved work folder during pending recovery could leave the
+  resumed guide pointing at its old connection file. Recovery now records the
+  selected file's current path while preserving the pinned guide template and
+  device binding. Repeated interruptions after that update are also covered.
+
+All **197 Python tests** and **11 native protocol scenarios** passed after the
+fixes. The Python suite includes the **32 regular-file flash cases** across both
+slots, a complete restarted walkthrough without another unlock, and the existing
+15-minute build-timeout, cancellation, Android-ID and root-verification checks.
+All 39 packaged hashes, syntax for 30 Python files, CLI help/preview entry points,
+and whitespace checks passed. A real tiny compressed EROFS tar build and file/
+symlink extraction passed with the local erofs-utils 1.7.1 tools.
+
+Reproduction logs, final results and source snapshots are in ignored
+`work/20261113T084839Z-restart-full-review/`. No physical device was contacted,
+unlocked, flashed or rebooted. The full-size DSU builder and its image inputs
+were unchanged; this review did not repeat the earlier full-image builds or
+establish hardware/WSL2 recovery validation.
+
+## Slot-A status and unlock recovery instructions — November 13, 2026
+
+The project maintainer confirmed successful community unlock/root installations
+on slot A. Its profile status, diagnostic output, guide notices and current
+documentation now reflect those reports. Firmware pins, partition mappings,
+stock-image checks and the required verification of each installation are unchanged.
+
+The initial warning and unlock confirmation now explicitly explain the factory
+reset in Android Recovery and loss of all user apps, accounts, settings and other
+local data. After the unlock reboot, the guide waits while the owner completes
+the recovery reset and Android setup, then explains how to re-enable debugging.
+The manual command help and instructions carry the same explanation. Devices
+already unlocked on their current boot still skip the unlock and reset steps.
+
+All **197 Python tests** passed, including the existing **32 regular-file flash
+cases**. The guide checks verify that the recovery/data-loss warning is shown
+before an unlock can run, declining still prevents writes, and resuming setup
+does not repeat the unlock. Package hashes, preview/CLI help, Python syntax,
+static-site HTML/JSON-LD and whitespace checks passed. Logs are in ignored
+`work/slot-a-and-unlock-recovery-update/`. No physical device was contacted and
+no website deployment was performed.

@@ -121,8 +121,8 @@ class SlotReportTests(unittest.TestCase):
         self.assertTrue(report["profile_comparison"]["active_slot_a"])
         self.assertTrue(report["profile_comparison"]["active_slot_matches_installer"])
         self.assertEqual(report["profile_comparison"]["installer_supported_slots"], ["_a", "_b"])
-        self.assertFalse(report["profile_comparison"]["root_method_hardware_verified"])
-        self.assertFalse(report["profile_comparison"]["unlock_hardware_verified"])
+        self.assertTrue(report["profile_comparison"]["root_method_hardware_verified"])
+        self.assertTrue(report["profile_comparison"]["unlock_hardware_verified"])
         self.assertFalse(report["installation_support_established"])
         entry = report["partitions"]["init_boot_a"]
         self.assertEqual(entry["mapping"]["value"], "/dev/block/mmcblk0p22")
@@ -180,6 +180,8 @@ class SlotReportTests(unittest.TestCase):
         _, report = self.collect(fake)
         self.assertEqual(report["collection_status"], "complete")
         self.assertFalse(report["profile_comparison"]["firmware_matches"])
+        self.assertFalse(report["profile_comparison"]["root_method_hardware_verified"])
+        self.assertFalse(report["profile_comparison"]["unlock_hardware_verified"])
         self.assertFalse(report["installation_support_established"])
 
     def test_wrong_model_or_expected_serial_stops_before_probes(self):

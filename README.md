@@ -48,11 +48,10 @@ Other builds, Android versions, and the older 2024 `jarvis` are
 outside the supported profile. The script checks these values and stops on a
 mismatch. Do not edit the profile to bypass a mismatch.
 
-**Slot B has hardware-verified unlock and root. Slot A is implemented and awaits
-its first successful complete hardware run.** A [community diagnostic report](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2#issuecomment-6833540065)
-confirmed the matching firmware and expected partition mappings on a locked
-slot-A unit; it did not verify unlocking, DSU boot or rooting on A. The guide
-shows this distinction before unlocking and installing root.
+**Both active slots have successful unlock and root results on the supported
+firmware.** The project maintainer confirmed successful community slot-A
+installations on November 13, 2026. Slot B has the measured hardware results above.
+See [the results and community update](docs/RESULTS.md).
 
 The installer uses the current active slot and never switches slots. Its DSU
 helper, backup, flash and verification are bound to that slot and physical unit.
@@ -65,6 +64,9 @@ valid, including completed or uncertain attempt journals.
 **Unlocking will factory-reset your onn and erase its apps, accounts, settings
 and other data. Unlocking or rooting could brick it: it may stop working and
 may not be recoverable.** Back up anything you want to keep before starting.
+After the unlock reboot, **complete the factory reset in Android Recovery on
+the TV**, following its on-screen controls to confirm the data wipe. Then finish
+Android setup, connect Ethernet or Wi-Fi, and re-enable debugging when prompted.
 
 The guide shows **Accept / Decline** buttons for both factory reset/data loss and
 possible permanent bricking. Use the arrow keys or Tab to choose, then press
@@ -140,6 +142,52 @@ Keep the repository's `work/` folder. It contains device identities, acceptance,
 progress, attempt records and backups. A completed guide reports its last saved
 successful result when reopened; that is not a fresh live device check.
 
+### Remove temporary leftovers and start again
+
+If an upload or temporary-system installation was interrupted, the guide offers
+**Remove temporary system and start again**. You can also choose **R** when
+reopening unfinished setup, or request that option directly:
+
+```sh
+python3 onn2026.py guide --restart-dsu
+```
+
+Select the same onn and review the removal prompt. This requires the supported,
+unlocked **original Android** to be running, with any temporary system disabled.
+The guide removes the temporary DSU image/data and its `onn26-stock-…raw.gz` /
+`onn26-root-…raw.gz` downloads, including incomplete uploads. It then prepares
+and uploads fresh images and repeats the two temporary boots. An already-unlocked
+onn skips unlocking.
+
+Previous progress, logs, attempt records and backups stay in `work/`. Each restart
+uses new temporary-system attempt records; old receipts cannot authorize the new
+attempt. A fresh clone can remove device-side leftovers with this option, but
+cannot recover records that were deleted. Keep your original work folder.
+
+This option refuses an attempted permanent-root write, an existing permanent-root
+installation, a running/enabled guest, or an unresolved reboot on the same boot.
+It does not bypass firmware or stock-image checks. If cleanup loses its connection,
+rerun the guide to inspect the current state and explicitly confirm recovery again.
+See [recovery and failure handling](docs/RECOVERY.md) before changing a device
+whose firmware write or reboot is uncertain.
+
+### The two temporary boots
+
+The **first DSU boot is a test** to check that temporary Android starts and that
+the onn can return to original Android. Observe the setup screen, skip setup,
+sign-in and debugging settings, then follow the prompt to power-cycle once back
+into original Android. **Root is not installed during this test.** The guide
+checks the original system after it returns, then prepares and starts a second
+DSU boot for root installation. ADB inside the test system is not required.
+
+The **second DSU boot is for root installation**: pair the remote if needed,
+connect Ethernet or Wi-Fi, and **stay in this system with the power on**. This image
+already starts network ADB on **port 5555** with the computer's public key included.
+Continue in the guide once the network is connected so it can try that prepared
+connection before you open debugging settings or sign in to Google. Google
+account setup is not a step in this guide. If it cannot connect, use the
+reconnection screen's debugging/pairing instructions as troubleshooting.
+
 ## More than one onn, or a changed IP
 
 Use the same guide for multiple supported **2026** units, **one at a time**.
@@ -157,6 +205,16 @@ and slot. After an IP change it looks for that same unit. Another onn taking the
 old address is rejected, even if its firmware is identical. If discovery cannot
 confirm one device, the guide asks you to check Wi-Fi/debugging or enter its new
 address; it does not select a different onn automatically.
+
+When the saved address is unavailable, discovery also checks ADB's mDNS
+advertisements for a changed wireless connection port and tries the prepared
+image's port 5555 at the saved IP. Paired devices are recognized when ADB lists
+their connection service name instead of an IP address. Pairing ports are excluded,
+and a discovered address must pass the same device checks. If multicast discovery
+is unavailable (including some WSL2 networks), enter the **IP:connection-port**
+shown on the TV. If pairing is needed, run `adb pair IP:PAIRING_PORT` in another
+terminal and enter the code shown on the TV, then use the separate connection port
+in the guide. See [Android's wireless ADB instructions](https://developer.android.com/tools/adb#connect-to-a-device-over-wi-fi).
 
 ## Preview and advanced use
 

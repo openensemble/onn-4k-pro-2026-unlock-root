@@ -16,6 +16,7 @@ import root_workflow as flow
 OLD = "192.0.2.71:5555"
 NEW = "192.0.2.88:5555"
 THIRD = "192.0.2.99:5555"
+TLS_NAME = "adb-JUSADEMOA-fixture._adb-tls-connect._tcp"
 BINDING = {"ro.serialno": "JUSADEMOA", "ro.product.device": o.PROFILE["device"],
            "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
            "ro.boot.slot_suffix": "_b"}
@@ -26,7 +27,7 @@ def props(serial="JUSADEMOA", **changes):
 
 
 class FakeSession(o.Session):
-    def __init__(self, work, connected=None, available=None, properties=None):
+    def __init__(self, work, connected=None, available=None, properties=None, mdns="", mdns_failed=False, aliases=None):
         super().__init__(work, "offline-reconnect-test")
         self.connected = dict(connected or {})
         self.available = dict(available or {})
@@ -34,16 +35,21 @@ class FakeSession(o.Session):
         self.calls = []
         self.reads = {}
         self.on_read = lambda target, count: None
+        self.mdns, self.mdns_failed = mdns, mdns_failed
+        self.aliases = dict(aliases or {})
 
     def run(self, label, argv, **kwargs):
         self.calls.append(list(argv))
         if argv[:2] == ["fake-adb", "connect"] and len(argv) == 3:
             if argv[2] in self.available:
-                self.connected[argv[2]] = self.available[argv[2]]
+                self.connected[self.aliases.get(argv[2], argv[2])] = self.available[argv[2]]
             output = ""
         elif argv == ["fake-adb", "devices", "-l"]:
             output = "List of devices attached\n" + "\n".join(
                 f"{target}\t{state}" for target, state in self.connected.items())
+        elif argv == ["fake-adb", "mdns", "services"]:
+            return {"returncode": 1 if self.mdns_failed else 0, "timed_out": self.mdns_failed,
+                    "stdout": self.mdns, "stderr": ""}
         elif len(argv) == 5 and argv[:2] == ["fake-adb", "-s"] and argv[3:] == ["shell", "getprop"]:
             target = argv[2]
             if self.connected.get(target) != "device":
@@ -103,6 +109,75 @@ class Connections(unittest.TestCase):
         self.assertFalse(result["ip_changed"])
         self.assertEqual(device.s.reads, {OLD: 2})
 
+    def test_paired_mdns_transport_is_usable_when_adb_lists_no_ip_address(self):
+        endpoint = "192.0.2.71:37123"
+        device = self.device(connected={TLS_NAME: "device"}, properties={TLS_NAME: props()},
+                             mdns="adb-JUSADEMOA-fixture _adb-tls-connect._tcp " + endpoint)
+        with patch.object(c, "scan", side_effect=AssertionError("Connected device must not need LAN scan")):
+            result = c.reconnect(device, self.path, scan_lan=True)
+        self.assertEqual(result["target"], TLS_NAME)
+        self.assertEqual(device.s.reads, {TLS_NAME: 2})
+        self.assertEqual(c.load(self.path)["last_network_address"], endpoint)
+        # A saved service name must also work on a later guide step.
+        self.assertEqual(c.reconnect(device, self.path)["target"], TLS_NAME)
+
+    def test_explicit_ip_can_resolve_its_paired_transport_without_reading_other_devices(self):
+        other = "adb-JUSAOTHER-fixture._adb-tls-connect._tcp"
+        device = self.device(connected={TLS_NAME: "device", other: "device"}, properties={TLS_NAME: props()},
+                             mdns="adb-JUSADEMOA-fixture _adb-tls-connect._tcp " + NEW + "\n"
+                                  "adb-JUSAOTHER-fixture _adb-tls-connect._tcp " + THIRD)
+        self.assertEqual(c.reconnect(device, self.path, candidate=NEW)["target"], TLS_NAME)
+        self.assertEqual(device.s.reads, {TLS_NAME: 2})
+
+    def test_mdns_connect_can_create_a_service_name_transport(self):
+        device = self.device(available={NEW: "device"}, aliases={NEW: TLS_NAME}, properties={TLS_NAME: props()},
+                             mdns="adb-JUSADEMOA-fixture _adb-tls-connect._tcp " + NEW)
+        self.assertEqual(c.reconnect(device, self.path)["target"], TLS_NAME)
+        self.assertEqual(c.load(self.path)["last_network_address"], NEW)
+
+    def test_saved_tls_transport_falls_back_to_prepared_port_without_mdns(self):
+        c.replace_record(self.path, {**c.load(self.path), "target": TLS_NAME, "last_network_address": "192.0.2.71:37123"})
+        device = self.device(available={OLD: "device"}, properties={OLD: props()}, mdns_failed=True)
+        with patch.object(c, "scan", side_effect=AssertionError("Known IP should work without LAN scan")):
+            self.assertEqual(c.reconnect(device, self.path, scan_lan=True)["target"], OLD)
+
+    def test_unauthorized_service_names_and_pairing_services_are_not_read(self):
+        pairing = "adb-JUSADEMOA-fixture._adb-tls-pairing._tcp"
+        device = self.device(connected={TLS_NAME: "unauthorized", pairing: "device"})
+        with self.assertRaises(ValueError):
+            c.reconnect(device, self.path)
+        self.assertEqual(device.s.reads, {})
+        self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_another_device_using_a_plausible_service_name_is_rejected(self):
+        device = self.device(connected={TLS_NAME: "device"}, properties={TLS_NAME: props("JUSAOTHER")})
+        with self.assertRaises(ValueError):
+            c.reconnect(device, self.path)
+        self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_new_device_selection_accepts_the_transport_for_the_entered_ip(self):
+        import guide as g
+        device = self.device(connected={TLS_NAME: "device"}, properties={TLS_NAME: props()},
+                             mdns="adb-JUSADEMOA-fixture _adb-tls-connect._tcp " + NEW)
+        device.binding = None
+        device.connection_path = None
+        args = o.parser().parse_args(["--work", self.tmp.name, "--target", NEW, "guide"])
+        ui = g.UI(read=lambda prompt: "", choose=lambda: True, emit=lambda message: None, clear=lambda: None)
+        with patch.object(o, "Session", return_value=device.s):
+            selected = g.select_connection(args, ui)
+        saved = c.load(selected)
+        self.assertEqual(saved["target"], TLS_NAME)
+        self.assertEqual(saved["last_network_address"], NEW)
+        self.assertEqual(saved["binding"], BINDING)
+
+    def test_atomic_completion_publication_never_overwrites_existing_receipt(self):
+        destination = Path(self.tmp.name) / "completion.json"
+        c.create_record(destination, {"complete": True})
+        with self.assertRaises(FileExistsError):
+            c.create_record(destination, {"complete": False})
+        self.assertEqual(json.loads(destination.read_text()), {"complete": True})
+        self.assertFalse(list(destination.parent.glob(".completion.json.*.tmp")))
+
     def test_explicit_candidate_reads_only_that_device(self):
         device = self.device(connected={OLD: "device", THIRD: "device"},
                              available={NEW: "device"}, properties={NEW: props()})
@@ -144,6 +219,59 @@ class Connections(unittest.TestCase):
         scan.assert_called_once_with(device.s)
         self.assertEqual(result["target"], NEW)
         self.assertEqual(device.s.reads, {OLD: 1, NEW: 2, THIRD: 1})
+
+    def test_mdns_finds_changed_tls_port_and_ignores_pairing_port(self):
+        endpoint = "192.0.2.71:37123"
+        device = self.device(available={endpoint: "device"}, properties={endpoint: props()},
+                             mdns="List of discovered mdns services\n"
+                                  "adb-fixture _adb-tls-connect._tcp " + endpoint + "\n"
+                                  "adb-pair _adb-tls-pairing._tcp 192.0.2.71:39000\n")
+        with patch.object(c, "scan", side_effect=AssertionError("Unneeded LAN scan")):
+            result = c.reconnect(device, self.path, scan_lan=True)
+        self.assertEqual(result["target"], endpoint)
+        self.assertTrue(result["ip_changed"])
+        self.assertEqual(device.s.reads, {endpoint: 2})
+        self.assertFalse(any("192.0.2.71:39000" in command for command in device.s.calls))
+
+    def test_mdns_advertised_name_does_not_substitute_for_verified_serial(self):
+        device = self.device(available={NEW: "device"}, properties={NEW: props("JUSAOTHER")},
+                             mdns="adb-JUSADEMOA _adb-tls-connect._tcp " + NEW)
+        with self.assertRaisesRegex(ValueError, "not found and authorized"):
+            c.reconnect(device, self.path)
+        self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_failed_mdns_falls_back_to_bounded_lan_scan(self):
+        device = self.device(available={NEW: "device"}, properties={NEW: props()}, mdns_failed=True)
+        with patch.object(c, "scan", return_value=[NEW]) as scan:
+            self.assertEqual(c.reconnect(device, self.path, scan_lan=True)["target"], NEW)
+        scan.assert_called_once_with(device.s)
+
+    def test_root_dsu_port_is_found_at_saved_ip_without_multicast_or_lan_scan(self):
+        record = {**c.load(self.path), "target": "192.0.2.71:37123"}
+        c.replace_record(self.path, record)
+        device = self.device(available={OLD: "device"}, properties={OLD: props()}, mdns_failed=True)
+        with patch.object(c, "scan", side_effect=AssertionError("Unneeded LAN scan")):
+            result = c.reconnect(device, self.path, scan_lan=True)
+        self.assertEqual(result["target"], OLD)
+        self.assertTrue(result["ip_changed"])
+        self.assertEqual(device.s.reads, {OLD: 2})
+
+    def test_explicit_candidate_skips_mdns_and_lan_discovery(self):
+        device = self.device(available={NEW: "device"}, properties={NEW: props()},
+                             mdns="adb-other _adb-tls-connect._tcp " + THIRD)
+        with patch.object(c, "discover_mdns", side_effect=AssertionError("Unrequested discovery")), \
+             patch.object(c, "scan", side_effect=AssertionError("Unrequested scan")):
+            c.reconnect(device, self.path, candidate=NEW)
+
+    def test_mdns_wrong_slot_and_ambiguous_identity_preserve_saved_address(self):
+        for values in ({NEW: props(**{"ro.boot.slot_suffix": "_a"})}, {NEW: props(), THIRD: props()}):
+            with self.subTest(values=values):
+                device = self.device(available={key: "device" for key in values}, properties=values,
+                                     mdns="\n".join("adb-fixture-" + str(i) + " _adb-tls-connect._tcp " + key
+                                                    for i, key in enumerate(values)))
+                with self.assertRaises(ValueError):
+                    c.reconnect(device, self.path)
+                self.assertEqual(self.path.read_bytes(), self.original)
 
     def test_connection_file_edit_during_discovery_is_not_overwritten(self):
         device = self.device(connected={NEW: "device"}, properties={NEW: props()})
@@ -231,6 +359,25 @@ class NetworkBounds(unittest.TestCase):
         self.assertEqual({str(n) for n in networks}, {"192.168.12.0/24", "10.9.8.0/28"})
         self.assertEqual(own, {"192.168.12.34", "10.9.8.7"})
         self.assertLessEqual(sum(n.num_addresses for n in networks), 272)
+
+    def test_mdns_endpoints_are_bounded_literal_addresses(self):
+        self.assertEqual(c.mdns_targets("a _adb._tcp. 192.0.2.71:5555\n"
+                                       "b _adb-tls-connect._tcp 192.0.2.71:5555\n"
+                                       "c _adb-tls-connect._tcp hostname:5555\n"
+                                       "d _adb-tls-connect._tcp 192.0.2.71:0\n"
+                                       "e _adb-tls-connect._tcp 127.0.0.1:5555\n"
+                                       "f _adb-tls-pairing._tcp 192.0.2.72:12345"), [OLD])
+        with self.assertRaisesRegex(o.Stop, "Too many advertised"):
+            c.mdns_targets("\n".join(f"a{i} _adb-tls-connect._tcp 192.0.2.{i}:5555" for i in range(1, 34)))
+
+    def test_conflicting_mdns_addresses_and_shell_fragments_are_rejected(self):
+        with self.assertRaisesRegex(o.Stop, "Conflicting"):
+            c.mdns_services("adb-fixture _adb-tls-connect._tcp " + NEW + "\n"
+                            "adb-fixture _adb-tls-connect._tcp " + THIRD)
+        self.assertEqual(c.adb_devices("bad;name._adb-tls-connect._tcp device\n"
+                                      "adb-fixture._adb-tls-pairing._tcp device\n"), {})
+        with self.assertRaises(o.Stop):
+            c.network_target(TLS_NAME)
 
     def test_more_than_four_lans_refuses_scan(self):
         with self.assertRaisesRegex(o.Stop, "More than four"):

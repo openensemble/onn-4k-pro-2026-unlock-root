@@ -25,7 +25,7 @@
     "@context": "https://schema.org",
     "@type": "TechArticle",
     "headline": "2026 onn 4K Pro unlock and permanent root",
-    "description": "Guided network unlock and root for jarvis2 on Android 14 build 15640252. The underlying unlock and permanent Magisk 30.7 root were verified on one unit; the complete guided installer has not been run end to end on hardware.",
+    "description": "Guided network unlock and root for jarvis2 on Android 14 build 15640252. Slot B has measured unlock and permanent Magisk 30.7 root results; community reports confirm successful slot-A installations.",
     "author": {"@type": "Organization", "name": "OpenEnsemble", "url": "https://github.com/openensemble"},
     "mainEntityOfPage": "https://openensemble.github.io/onn-4k-pro-2026-unlock-root/",
     "image": "https://openensemble.github.io/onn-4k-pro-2026-unlock-root/assets/onn-4k-pro-2026.png",
@@ -110,7 +110,7 @@
             <div><dt>Userspace</dt><dd>ARM32 <code>armeabi-v7a</code></dd></div>
             <div><dt>Root target</dt><dd>Active <code>init_boot_a</code> or <code>init_boot_b</code> <span class="spec-secondary">8 MiB</span></dd></div>
           </dl>
-          <p class="spec-footnote">Slot B has hardware-verified unlock and root. Slot A is implemented and awaits its first successful complete hardware run. The installer keeps the selected slot throughout. Keep the profile checks intact.</p>
+          <p class="spec-footnote">Both active slots have successful unlock and root results: community reports for slot A and measured hardware verification for slot B. The installer keeps the selected slot throughout. Keep the profile checks intact.</p>
         </div>
       </div>
     </section>
@@ -124,7 +124,7 @@
         <span class="risk-symbol" aria-hidden="true">!</span>
         <div>
           <h3 id="risk-title">Read this before unlocking.</h3>
-          <p><strong>Unlocking will factory-reset your onn and erase its data. Unlocking or rooting could permanently brick it.</strong> Back up anything you want to keep. A proven way to restore a bad root installation is not available for this workflow.</p>
+          <p><strong>Unlocking requires a factory reset in Android Recovery on the TV. It erases all user apps, accounts, settings and other local data. Unlocking or rooting could permanently brick it.</strong> Back up anything you want to keep. After the unlock reboot, follow recovery's on-screen controls to complete the reset. A proven way to restore a bad root installation is not available for this workflow.</p>
           <p>The script asks you to choose <strong>Accept</strong> or <strong>Decline</strong>. <a href="https://github.com/openensemble/onn-4k-pro-2026-unlock-root/blob/main/docs/RECOVERY.md">Read the recovery limitations ↗</a></p>
         </div>
       </aside>
@@ -162,12 +162,13 @@ python3 onn2026.py</code></pre>
         <div class="evidence-grid">
           <article class="evidence-tested">
             <p class="evidence-label"><span class="status-dot" aria-hidden="true"></span>WHAT WAS TESTED</p>
-            <h3>Measured on one supported onn on slot B.</h3>
+            <h3>Measured slot-B results and slot-A community reports.</h3>
             <ul>
               <li>Persistent unlock and <strong>Magisk 30.7 root</strong> after normal Android and Magisk’s setup reboot.</li>
               <li>The temporary Android return, root console, one <code>init_boot</code> flash and independent readback.</li>
               <li>The original Android returned, <strong>SELinux stayed Enforcing</strong>, and the temporary system was removed.</li>
               <li>The builder and root verifier were checked. The guided flow, reconnects and reboot guards were checked with simulated device responses.</li>
+              <li>Community reports confirm successful unlock and root installations on active slot A.</li>
             </ul>
             <a class="text-link" href="https://github.com/openensemble/onn-4k-pro-2026-unlock-root/blob/main/docs/RESULTS.md">Read the measured results <span aria-hidden="true">↗</span></a>
           </article>
@@ -175,9 +176,8 @@ python3 onn2026.py</code></pre>
             <p class="evidence-label">WHAT WAS NOT TESTED</p>
             <h3>These limits still apply.</h3>
             <ul>
-              <li>A complete unlock, temporary-system boot and permanent-root installation on slot A.</li>
-              <li>The complete guided installer on a real device from start to finish.</li>
-              <li>The new automatic restart and reconnect logic under real network conditions.</li>
+              <li>Every recovery, interruption and reconnect path on real hardware.</li>
+              <li>The latest recovery and wireless discovery changes under real network conditions.</li>
               <li>Recovery after power loss or an unbootable modified <code>init_boot</code> image.</li>
             </ul>
             <p>The already-rooted unit was not unlocked or flashed again to test the packaged workflow. A stock backup does not guarantee recovery.</p>
@@ -192,7 +192,7 @@ python3 onn2026.py</code></pre>
       <div><p class="eyebrow">04 / GOOD TO KNOW</p><h2 id="faq-title">A few practical<br>details.</h2></div>
       <div class="faq-list">
         <details><summary>Can this handle multiple onns or a changed IP?</summary><p>Yes. Add each supported 2026 unit once using its IP address, then choose it from the saved-device list. Each keeps its own progress and backups. After an address change, the guide looks for the same hardware serial. If it cannot verify the unit, it asks for help rather than selecting a different onn.</p></details>
-        <details><summary>Does the script handle the restarts?</summary><p>It requests the unlock, verified root-install and temporary-system restarts automatically. The temporary-system return test still needs one physical power cycle. Magisk handles its own setup restart after you accept its message on the TV. An uncertain reboot request is never automatically repeated.</p></details>
+        <details><summary>Does the script handle the restarts?</summary><p>It requests the unlock, verified root-install and temporary-system restarts automatically. After the unlock reboot, you must complete the factory reset in Android Recovery on the TV; this erases all user apps, accounts, settings and other local data. The temporary-system return test still needs one physical power cycle. Magisk handles its own setup restart after you accept its message on the TV. An uncertain reboot request is never automatically repeated.</p></details>
         <details><summary>Can I stop and continue later?</summary><p>Type <code>q</code> at a prompt, then run <code>python3 onn2026.py</code> again to continue. Keep the computer’s <code>work/</code> folder with its progress, backups and attempt records. An uncertain write or reboot stops for inspection instead of being replayed.</p></details>
         <details><summary>What happens to automatic updates?</summary><p>The guide disables automatic Android system-update scheduling and checks the setting before reporting completion. App updates are separate, and manual system updates remain available.</p></details>
         <details><summary>Is this the installer for the 2024 onn?</summary><p>No. The earlier <code>jarvis / SNA</code> hardware has a <a href="https://openensemble.github.io/onn-4k-pro-unlock-root/">separate 2024 unlock and root guide</a>. Use the installer for your exact model and firmware.</p></details>

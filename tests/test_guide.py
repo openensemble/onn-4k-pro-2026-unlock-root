@@ -1,6 +1,7 @@
 """Exercise the real guide state machine with a transport that cannot contact devices."""
 from contextlib import redirect_stdout
 from io import StringIO
+import fcntl
 import hashlib
 import json
 from pathlib import Path
@@ -123,6 +124,16 @@ class GuideTests(unittest.TestCase):
         self.assertIn("brick", "\n".join(self.messages))
         self.assertFalse(any("/example/" in prompt for prompt in self.prompts))
 
+    def test_two_temporary_boots_are_distinct_and_second_uses_prepared_debugging(self):
+        self.guide.run()
+        messages = "\n".join(self.messages)
+        self.assertIn("FIRST DSU boot is a test", messages)
+        self.assertIn("Root is not installed during this test", messages)
+        self.assertIn("SECOND temporary boot is the root installation system", messages)
+        self.assertIn("Debugging access for this computer is already prepared", messages)
+        self.assertIn("Ethernet or Wi-Fi", messages)
+        self.assertNotIn("Developer options and debugging may be off again", messages)
+
     def test_declining_risks_stops_before_any_operation(self):
         self.ui.choose = lambda: False
         with self.assertRaises(g.Paused):
@@ -145,13 +156,22 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(len(acceptances), 3)
         for message in acceptances:
             self.assertIn("Active slot A", message)
-            self.assertIn("has not yet been verified on hardware", message)
+            self.assertIn("confirmed by community reports", message)
         self.assertEqual(self.state["consent"]["binding"], binding)
         self.assertEqual(self.backend.count("unlock"), 1)
         self.assertEqual(self.backend.count("install"), 1)
 
     def test_declining_unlock_starts_no_unlock_or_root_write(self):
-        self.ui.choose = lambda: self.state["phase"] != "unlock"
+        def choose():
+            if self.state["phase"] == "unlock":
+                message = self.messages[-1]
+                self.assertIn("factory reset in Android Recovery on the TV", message)
+                self.assertIn("ALL user apps, accounts, settings and other data", message)
+                self.assertIn("Back up anything you want to keep before accepting", message)
+                self.assertEqual(self.backend.count("unlock"), 0)
+                return False
+            return True
+        self.ui.choose = choose
         with self.assertRaises(g.Paused):
             self.guide.run()
         self.assertEqual(self.state["phase"], "unlock")
@@ -166,7 +186,9 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.count("unlock"), 1)
         self.assertEqual(self.backend.count("unlocked_check"), 0)
         instructions = "\n".join(self.messages)
-        for required in ("Developer mode", "USB debugging", "Wi-Fi debugging", "seven times"):
+        for required in ("Complete the factory reset in Android Recovery on the TV",
+                         "confirm the data wipe", "Ethernet or Wi-Fi",
+                         "Developer mode", "USB debugging", "Wi-Fi debugging", "seven times"):
             self.assertIn(required, instructions)
         self.ui.read = self.answer
         self.resume().run()
@@ -213,6 +235,7 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.count("unlock"), 0)
         self.assertEqual(self.backend.count("unlock_reboot"), 0)
         self.assertFalse(any("The unlock is confirmed" in line for line in self.messages))
+        self.assertNotIn("Complete the factory reset in Android Recovery on the TV.", "\n".join(self.messages))
 
     def test_bad_firmware_baseline_stops_before_unlock(self):
         self.backend.failures["baseline"] = o.Stop("Unsupported Android firmware")
@@ -544,12 +567,32 @@ class GuideTests(unittest.TestCase):
         lock_dir = self.work / "work"
         lock_dir.mkdir()
         with (lock_dir / "guide.lock").open("a") as lock:
-            g.fcntl.flock(lock, g.fcntl.LOCK_EX | g.fcntl.LOCK_NB)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with patch.object(g.sys.stdin, "isatty", return_value=True), patch.object(o, "verify_files"), \
                  patch.object(o, "ROOT", self.work), patch.object(g.shutil, "which", return_value="/fixture/adb"), \
                  patch.object(g, "select_connection", side_effect=AssertionError("Second guide reached device selection")):
                 self.assertEqual(g.start(args, self.ui), 2)
         self.assertTrue(any("Another guide is already open" in message for message in self.messages))
+
+    def test_shared_work_folder_is_locked_across_different_checkouts(self):
+        args = o.parser().parse_args(["--work", str(self.work), "--connection", str(self.connection_file), "guide"])
+        with (self.work / "guide.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(g.sys.stdin, "isatty", return_value=True), patch.object(o, "verify_files"), \
+                 patch.object(o, "ROOT", self.work / "another-checkout"), \
+                 patch.object(g.shutil, "which", return_value="/fixture/adb"), \
+                 patch.object(g, "select_connection", side_effect=AssertionError("Another checkout reached device selection")):
+                self.assertEqual(g.start(args, self.ui), 2)
+
+    def test_manual_staging_cannot_run_during_a_guide_using_the_same_work_folder(self):
+        args = ["--work", str(self.work), "--target", "192.0.2.71:5555", "stage-dsu",
+                "--build", str(self.work / "unused-build.json"), "--kind", "stock"]
+        with (self.work / "guide.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(o, "ROOT", self.work / "another-checkout"), \
+                 patch.object(o, "Device", side_effect=AssertionError("Concurrent device action was started")), \
+                 redirect_stdout(StringIO()):
+                self.assertEqual(o.main(args), 2)
 
     def test_existing_manual_attempt_is_not_replaced_by_a_new_guide(self):
         args = o.parser().parse_args(["--work", str(self.work), "--connection", str(self.connection_file), "guide"])

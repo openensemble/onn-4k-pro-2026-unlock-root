@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Pinned jarvis2 workflow. No startup edits or automatic write/reboot retries."""
 import argparse
+from contextlib import contextmanager, ExitStack, nullcontext
+import fcntl
 import hashlib
 import json
 import os
@@ -23,6 +25,24 @@ PROFILE = json.loads((ROOT / "profile.json").read_text())
 IDENTITY = FIELDS
 UNLOCKED = {"ro.boot.flash.locked": "0", "ro.boot.vbmeta.device_state": "unlocked",
             "ro.boot.verifiedbootstate": "orange"}
+MODIFYING_COMMANDS = {"fetch-inputs", "unlock", "prepare-root", "build-dsu", "stage-dsu", "boot-dsu",
+                      "install-root", "cleanup-root", "disable-updates", "enable-updates"}
+
+
+@contextmanager
+def operation_lock(work):
+    """Serialize changes to shared receipts and this checkout's build cache."""
+    directories = sorted({(ROOT / "work").resolve(), Path(work).resolve()})
+    with ExitStack() as stack:
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+            lock = stack.enter_context((directory / "guide.lock").open("a"))
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Stop("Another guide is already open or a modifying command is using these records. "
+                           "Finish it before starting another.") from None
+        yield
 
 
 def digest(path):
@@ -212,7 +232,9 @@ def status(device, name=None):
 
 
 def unlock(device, accepted):
-    require(accepted, "Unlocking will factory-reset the onn and erase its data. Read the instructions and supply --accept-data-loss.")
+    require(accepted, "Unlocking requires a factory reset in Android Recovery after the unlock reboot, "
+            "erasing all user apps, accounts, settings and other local data. "
+            "Read the instructions and supply --accept-data-loss.")
     props = device.identify()
     state, boot = lock_state(device)
     if state == 0:
@@ -436,7 +458,9 @@ def parser():
     discovery.add_argument("--scan-lan", action="store_true", help="If needed, scan port 5555 on bounded local LANs")
     discovery.add_argument("--candidate", help="Check only this IPv4 address, optionally followed by :port")
     u = sub.add_parser("unlock", help="One direct trusted-service unlock; never reboots")
-    u.add_argument("--accept-data-loss", action="store_true")
+    u.add_argument("--accept-data-loss", action="store_true",
+                   help="Accept erasing all user apps, accounts, settings and local data; "
+                        "complete the factory reset in Android Recovery after the unlock reboot")
     sub.add_parser("fetch-inputs", help="Download pinned official OTA/Magisk and extract init_boot")
     root = sub.add_parser("prepare-root", help="Patch init_boot on the selected device; no firmware flash")
     root.add_argument("--stock-init-boot", type=Path, default=ROOT / "cache/firmware/init_boot.img")
@@ -457,33 +481,34 @@ def main(argv=None):
         return guide.start(args)
     session = Session(args.work, args.command)
     try:
-        if args.command == "verify-files":
-            verify_files()
-            result = {"packaged_inputs_verified": True}
-        elif args.command == "fetch-inputs":
-            result = fetch_inputs(session)
-        elif args.command == "devices":
-            import connection
-            result = connection.devices(args.work)
-        else:
-            import connection
-            saved = connection.load(args.connection) if args.connection else None
-            device = Device(session, saved["target"] if saved else args.target, args.adb)
-            if saved:
-                device.binding = saved["binding"]
-                device.connection_path = args.connection.resolve()
-            if args.command == "status":
-                result = status(device, args.name)
-            elif args.command == "reconnect":
+        with operation_lock(args.work) if args.command in MODIFYING_COMMANDS else nullcontext():
+            if args.command == "verify-files":
                 verify_files()
-                result = connection.reconnect(device, args.connection, args.candidate, args.scan_lan)
-            elif args.command == "unlock":
-                result = unlock(device, args.accept_data_loss)
-            elif args.command == "prepare-root":
-                result = prepare_root(device, args.stock_init_boot, args.magisk_apk)
+                result = {"packaged_inputs_verified": True}
+            elif args.command == "fetch-inputs":
+                result = fetch_inputs(session)
+            elif args.command == "devices":
+                import connection
+                result = connection.devices(args.work)
             else:
-                import root_workflow
-                result = root_workflow.run(device, args)
+                import connection
+                saved = connection.load(args.connection) if args.connection else None
+                device = Device(session, saved["target"] if saved else args.target, args.adb)
+                if saved:
+                    device.binding = saved["binding"]
+                    device.connection_path = args.connection.resolve()
+                if args.command == "status":
+                    result = status(device, args.name)
+                elif args.command == "reconnect":
+                    verify_files()
+                    result = connection.reconnect(device, args.connection, args.candidate, args.scan_lan)
+                elif args.command == "unlock":
+                    result = unlock(device, args.accept_data_loss)
+                elif args.command == "prepare-root":
+                    result = prepare_root(device, args.stock_init_boot, args.magisk_apk)
+                else:
+                    import root_workflow
+                    result = root_workflow.run(device, args)
         print(json.dumps(result, indent=2))
         print("Receipts:", session.path)
         return 0

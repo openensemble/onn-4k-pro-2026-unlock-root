@@ -14,8 +14,9 @@ import urllib.request
 import uuid
 
 import onn2026 as o
+import dsu_recovery
 import host_build
-from guide_core import MAGISK_OPEN, ROOT_ACCESS_HELP, RootAccessUnavailable
+from guide_core import MAGISK_OPEN, ROOT_ACCESS_HELP, RootAccessUnavailable, TemporarySystemPresent
 
 COMMANDS = {"build-dsu", "stage-dsu", "dsu-status", "boot-dsu", "confirm-stock-return",
             "install-root", "verify-root", "cleanup-root", "disable-updates", "updates-status", "enable-updates"}
@@ -31,6 +32,8 @@ def bound(device, record):
 
 
 def journal(device, name):
+    if name.startswith("dsu-"):
+        return dsu_recovery.journal_directory(device) / name
     key = hashlib.sha256(device.binding["ro.serialno"].encode()).hexdigest()
     return device.s.work / "devices" / key / name
 
@@ -205,13 +208,16 @@ def build_dsu(device, args):
 def stage_dsu(device, args):
     build = read(args.build)
     build_matches(device, build)
+    cycle = dsu_recovery.cycle(device)
     current = state(device)
     if args.kind == "stock":
-        o.require(current == "normal", "An existing DSU must not be overwritten")
+        if current != "normal":
+            raise TemporarySystemPresent("An existing DSU must not be overwritten. " + dsu_recovery.HINT)
     else:
         o.require(args.rehearsal, "Supply this device's successful stock-return receipt")
         rehearsal = read(args.rehearsal)
         bound(device, rehearsal)
+        dsu_recovery.check_stage(device, rehearsal)
         o.require(rehearsal.get("stock_single_use_return_verified") is True,
                   "Stock single-use return was not demonstrated")
         o.require(rehearsal["build_sha256"] == o.digest(args.build), "Rehearsal used another DSU build")
@@ -225,13 +231,17 @@ def stage_dsu(device, args):
     expected = build[args.kind + "_gzip_sha256"]
     o.require(o.digest(archive) == expected, "DSU archive changed")
     attempt = journal(device, "dsu-" + args.kind + "-stage-attempt.json")
-    o.require(not attempt.exists(), "This staging action was already attempted; inspect its receipt")
+    if attempt.exists():
+        raise TemporarySystemPresent("This staging action was already attempted; inspect its receipt. " + dsu_recovery.HINT)
     remote = "/storage/emulated/0/Download/onn26-" + args.kind + "-" + expected[:12] + ".raw.gz"
     missing = device.shell("staging-name-unused", "test", "!", "-e", remote, check=False)
-    o.require(missing["returncode"] == 0 and not missing["timed_out"], "Remote staging path already exists")
+    o.require(not missing["timed_out"] and missing["returncode"] in (0, 1), "Remote staging path check failed")
+    if missing["returncode"] == 1:
+        raise TemporarySystemPresent("Remote staging path already exists. " + dsu_recovery.HINT)
     request = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": android_id,
                "kind": args.kind, "build": str(args.build.resolve()), "build_sha256": o.digest(args.build),
-               "remote": remote, "archive_sha256": expected, "enabled": False, "automatic_retry": False}
+               "remote": remote, "archive_sha256": expected, "dsu_cycle": cycle,
+               "enabled": False, "automatic_retry": False}
     o.save(attempt, request, exclusive=True)
     # A transfer timeout never initiates installation and is never automatically retried.
     device.call("push-dsu", "push", str(archive), remote, timeout=180)
@@ -252,6 +262,7 @@ def stage_dsu(device, args):
 def dsu_status(device, args):
     stage = read(args.stage)
     bound(device, stage)
+    dsu_recovery.check_stage(device, stage)
     current = state(device)
     log = device.text("installation-log", "logcat", "-d", "-v", "brief", "-s",
                       "DynamicSystemInstallationService", "InstallationAsyncTask", "gsid", "DynamicSystemService",
@@ -270,6 +281,7 @@ def dsu_status(device, args):
 def boot_dsu(device, args):
     stage = read(args.stage)
     bound(device, stage)
+    dsu_recovery.check_stage(device, stage)
     installed = read(args.stage.parent / "installed.json")
     o.require(installed.get("installed_disabled_verified") is True and
               installed["stage_sha256"] == o.digest(args.stage), "Run dsu-status and verify completed installation first")
@@ -295,6 +307,7 @@ def boot_dsu(device, args):
 def stock_return(device, args):
     stage = read(args.stage)
     bound(device, stage)
+    dsu_recovery.check_stage(device, stage)
     o.require(stage["kind"] == "stock" and args.observed_setup and args.power_cycled_back,
               "Confirm that stock DSU reached setup and one physical power cycle returned original Android")
     boot_request = read(args.stage.parent / "boot-request.json")
@@ -304,6 +317,7 @@ def stock_return(device, args):
     android_id = device.text("returned-android-id", "settings", "get", "secure", "android_id")
     o.require(android_id == stage["android_id"], "This is not the original Android installation")
     result = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": android_id,
+              "dsu_cycle": stage.get("dsu_cycle"),
               "build_sha256": stage["build_sha256"], "stock_single_use_return_verified": True,
               "owner_observed_setup_and_power_cycle": True,
               "modified_init_boot_recovery_proven": False}
@@ -364,6 +378,7 @@ def install_root(device, args):
     patch, image = patch_receipt(device, args.patch_result)
     stage = read(args.stage)
     bound(device, stage)
+    dsu_recovery.check_stage(device, stage)
     o.require(stage["kind"] == "root" and stage["android_id"] == patch["android_id"], "Not this installation's root DSU")
     build = read(Path(stage["build"]))
     o.require(o.digest(stage["build"]) == stage["build_sha256"], "Build receipt changed")

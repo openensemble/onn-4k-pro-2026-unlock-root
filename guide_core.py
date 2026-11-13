@@ -16,6 +16,10 @@ class RootAccessUnavailable(Stop):
     """A read-only root request needs the user's attention before another check."""
 
 
+class TemporarySystemPresent(Stop):
+    """Offer an explicit, separately guarded restart of temporary-system setup."""
+
+
 def require(condition, message):
     if not condition:
         raise Stop(message)
@@ -28,7 +32,8 @@ def now():
 SCHEMA = "onn26-guide-v1"
 RISK_VERSION = 1
 RISK_TEXT = (
-    "Unlocking will factory-reset your onn and erase its apps, accounts, settings and other data.\n"
+    "Unlocking will factory-reset your onn and erase ALL user apps, accounts, settings and other data.\n"
+    "After the unlock reboot, you must complete that factory reset in Android Recovery on the TV.\n"
     "Back up anything you want to keep before continuing. An already-unlocked onn skips the unlock step.\n\n"
     "Unlocking or rooting could brick your onn: it may stop working and may not be recoverable.\n"
     "A proven way to restore a bad root installation is not available for this workflow.\n"
@@ -63,15 +68,15 @@ PHASES = (
 )
 PAGE_TITLES = {
     "consent": "Read and accept the risks", "host": "Check your computer", "baseline": "Check your onn",
-    "unlock": "Unlock your onn", "unlock_reboot": "Restart after unlocking", "unlock_return": "Finish Android setup",
+    "unlock": "Unlock your onn", "unlock_reboot": "Restart after unlocking", "unlock_return": "Complete the recovery reset and Android setup",
     "debugging_after_unlock": "Turn debugging back on", "unlocked_check": "Confirm the unlock",
     "fetch": "Download the matching files", "patch": "Prepare root for this onn",
-    "build": "Prepare the temporary Android systems", "stock_stage": "Install the first temporary system",
-    "stock_wait": "Check the first installation", "stock_boot": "Start the first temporary system",
-    "stock_seen": "Wait for the Android setup screen", "stock_return_prompt": "Return to your original Android",
-    "stock_return": "Check that your original Android returned", "root_stage": "Prepare the installation system",
-    "root_wait": "Check the installation system", "root_boot": "Start the installation system",
-    "root_setup": "Connect the temporary system to Wi-Fi", "root_ready": "Check that the system is ready",
+    "build": "Prepare the temporary Android systems", "stock_stage": "Prepare the DSU test image",
+    "stock_wait": "Check the DSU test image", "stock_boot": "First DSU boot: test temporary Android",
+    "stock_seen": "DSU test: watch for the setup screen", "stock_return_prompt": "Finish the DSU test: return to original Android",
+    "stock_return": "Check that your original Android returned", "root_stage": "Prepare the DSU root installation image",
+    "root_wait": "Check the root installation image", "root_boot": "Second DSU boot: install root",
+    "root_setup": "Stay in the DSU root installation system", "root_ready": "Check that the system is ready",
     "flash_consent": "Confirm the root installation", "install": "Back up and install root",
     "install_reboot": "Restart into your original Android", "normal_return": "Wait for your original Android",
     "normal_check": "Check the original Android",
@@ -85,16 +90,19 @@ REPEATABLE = {"host", "baseline", "unlocked_check", "fetch", "build", "stock_wai
 PREVIEW = """2026 onn unlock and root guide
 
 The exact supported firmware may run on active slot A or B. The guide keeps
-that slot throughout. Slot B has hardware verification; slot A awaits a
-successful complete hardware run.
+that slot throughout. Slot A has successful community unlock/root reports;
+slot B has measured hardware verification.
 
 1. Enable Developer mode, USB debugging and Wi-Fi/network debugging, then choose your onn.
 2. Read and accept the factory-reset, data-loss and bricking warning.
 3. Check the computer, Android version and selected onn.
-4. Unlock once if needed and restart automatically. Finish Android setup and enable debugging again.
+4. Unlock once if needed and restart into Android Recovery. Complete the factory reset on the TV;
+   it erases all user apps, accounts, settings and other local data. Finish Android setup and enable debugging again.
 5. Download the matching files and prepare root for this specific onn.
-6. Try a temporary Android system and use one power cycle to prove the original returns.
-7. Start the temporary system used for installation; reconnect its Wi-Fi on the TV.
+6. First DSU boot is a test: observe setup, then power-cycle once back to original Android.
+   The guide verifies the return before preparing a second DSU boot. Root is not installed during the test.
+7. Second DSU boot is for root installation: stay in it and connect Ethernet/Wi-Fi.
+   Continue once connected; debugging is prepared automatically, without Google sign-in.
 8. Review the final warning, back up the original image, and install root once.
 9. Restart automatically into normal Android, then finish Magisk's setup and its restart.
 10. Verify permanent root, remove the temporary system, and turn off automatic system updates.
@@ -102,6 +110,8 @@ successful complete hardware run.
 The guide runs the commands and remembers the files for you. It checks the same
 serial after IP changes. Type q at a prompt to leave and run the same command to
 return. An uncertain write or reboot is never automatically repeated.
+For abandoned temporary-system setup, guide --restart-dsu offers a checked
+removal and fresh upload from original Android, preserving previous records.
 """
 
 
@@ -179,8 +189,7 @@ def slot_notice(binding):
     slot = binding.get("ro.boot.slot_suffix")
     require(slot in ("_a", "_b"), "The selected onn has no supported active slot")
     if slot == "_a":
-        return ("Active slot A: installer support is implemented, but a complete unlock and root\n"
-                "installation on slot A has not yet been verified on hardware.\n\n")
+        return "Active slot A: unlock and root have been confirmed by community reports for this firmware.\n\n"
     return "Active slot B: unlock and root have been verified on hardware for this firmware.\n\n"
 
 
@@ -277,9 +286,12 @@ class Guide:
             self.state["pending"] = None
             self.persist()
         else:
-            raise Stop("The last device operation has no confirmed completion. It will not be repeated. "
+            error = TemporarySystemPresent if pending["phase"] in (
+                "stock_stage", "root_stage", "stock_boot", "root_boot") else Stop
+            raise error("The last device operation has no confirmed completion. It will not be repeated. "
                          "Keep the onn in its current state; do not restart it or delete the saved records. "
-                         "Review the receipts in " + str(receipt.parent))
+                         "Review the receipts in " + str(receipt.parent) +
+                         ". For abandoned temporary-system setup, use guide --restart-dsu.")
 
     def act(self, next_phase, **values):
         phase = self.state["phase"]
@@ -353,8 +365,11 @@ class Guide:
                     "unlocked_check" if r["unlocked_on_current_boot"] else "unlock_reboot"))
             elif phase == "unlock":
                 self.ui.accept(support_notice + "Ready to unlock " + self.state["name"] + ".\n"
-                               "This will factory-reset it and erase its data. This step is performed only once.\n"
-                               "Once the unlock is confirmed, this will restart the onn automatically.")
+                               "Unlocking requires a factory reset in Android Recovery on the TV.\n"
+                               "This erases ALL user apps, accounts, settings and other data stored on the onn.\n"
+                               "Back up anything you want to keep before accepting.\n\n"
+                               "The guide will unlock once and restart the onn. You must then complete the factory reset\n"
+                               "using the recovery screen's instructions before setting up Android again.")
                 self.ui.say("Unlocking once and checking the result...")
                 self.act(lambda r: "unlocked_check" if r.get("already_unlocked") else "unlock_reboot")
             elif phase == "unlock_reboot":
@@ -365,10 +380,13 @@ class Guide:
                     # Older saved guides waited here for a manual restart.
                     self.advance("unlock_reboot")
                     continue
-                restart = ("Android has already restarted." if results["unlock_reboot"]["already_rebooted"]
-                           else "The automatic restart was requested once. Wait for Android to start.")
+                restart = ("The onn has already restarted." if results["unlock_reboot"]["already_rebooted"]
+                           else "The automatic restart was requested once. Watch the TV for Android Recovery.")
                 self.ui.wait(restart + "\n"
-                             "Finish the fresh Android setup after the factory reset and reconnect Wi-Fi.\n"
+                             "Complete the factory reset in Android Recovery on the TV.\n"
+                             "Select the factory reset option and confirm the data wipe using recovery's on-screen controls.\n"
+                             "After the reset, reboot into Android if prompted. If the reset has already finished, continue with setup.\n"
+                             "Finish the fresh Android setup and connect Ethernet or Wi-Fi.\n"
                              "The next screen will help you turn debugging back on.")
                 self.advance("debugging_after_unlock")
             elif phase == "debugging_after_unlock":
@@ -389,7 +407,8 @@ class Guide:
                 self.act("stock_stage", **results["host"])
             elif phase in ("stock_stage", "root_stage"):
                 kind = "stock" if phase == "stock_stage" else "root"
-                self.ui.say("\nCopying the temporary Android system to the onn. It stays off until the next restart step...")
+                image = "DSU test image" if kind == "stock" else "DSU root installation image"
+                self.ui.say("\nCopying the " + image + " to the onn. It stays off until the next restart step...")
                 self.act(kind + "_wait", build=results["build"]["build"], kind=kind,
                          rehearsal=results.get("stock_return", {}).get("rehearsal"))
             elif phase in ("stock_wait", "root_wait"):
@@ -402,25 +421,41 @@ class Guide:
                                  "Press Enter to check again. This does not restart installation.")
             elif phase in ("stock_boot", "root_boot"):
                 kind = "stock" if phase == "stock_boot" else "root"
-                self.ui.wait("The temporary system is ready. The onn will restart once and show an Android setup screen.\n"
-                             "This temporary system is set to run for one boot. Have the TV remote ready.")
+                if kind == "stock":
+                    message = ("This FIRST DSU boot is a test to check that temporary Android starts.\n"
+                               "Root is not installed during this test.\n"
+                               "The onn will restart and show an Android setup screen. Skip setup and sign-in.\n"
+                               "Then follow the next prompt to power-cycle back to original Android.\n"
+                               "After checking that return, the guide will start a SECOND DSU boot to install root.")
+                else:
+                    message = ("The DSU test passed and your original Android was verified.\n"
+                               "This SECOND DSU boot is for root installation, after your final confirmation.\n"
+                               "The onn will restart into the installation system. Stay in it and leave the power on.\n"
+                               "Have the TV remote ready to connect Ethernet or Wi-Fi if needed.")
+                self.ui.wait(message)
                 self.ui.say("Requesting the one restart. A lost connection during restart is expected.")
                 self.act("stock_seen" if kind == "stock" else "root_setup", stage=results[kind + "_stage"]["stage"])
             elif phase == "stock_seen":
-                self.ui.wait("Watch the TV. Wait until the temporary Android setup screen appears.\n"
-                             "You do not need to sign in. Continue only after you have seen that setup screen.")
+                self.ui.wait("This FIRST temporary boot is the DSU test. Watch for the Android setup screen.\n"
+                             "Skip setup, Google sign-in and debugging settings. Root is not installed during this test.\n"
+                             "Next, you will power-cycle back to original Android. The guide will check it\n"
+                             "and then start a SECOND DSU boot for root installation.\n"
+                             "Continue only after you have seen that setup screen.")
                 self.advance("stock_return_prompt")
             elif phase == "stock_return_prompt":
                 self.ui.wait("Now unplug the onn's power and plug it back in once. Wait for your original Android to return.\n"
+                             "The guide will check that original Android returned, then prepare a SECOND DSU boot to install root.\n"
                              "If you have already done this, leave it running. Continue when the original system is back.")
                 self.advance("stock_return")
             elif phase == "stock_return":
                 self.ui.say("\nChecking that your original Android returned...")
                 self.act("root_stage", stage=results["stock_stage"]["stage"], observed_setup=True, power_cycled_back=True)
             elif phase == "root_setup":
-                self.ui.wait("The TV should show temporary Android setup again. Use the remote to connect it to Wi-Fi.\n"
-                             "Leave the onn on this temporary system. You do not need to sign in to Google.\n"
-                             "Continue when Wi-Fi is connected.")
+                self.ui.wait("This SECOND temporary boot is the root installation system. Stay in it; leave the power on.\n"
+                             "Pair the remote if needed and connect Ethernet or Wi-Fi.\n"
+                             "Debugging access for this computer is already prepared in this temporary image.\n"
+                             "Continue here once the network is connected, before opening debugging settings or signing in to Google.\n"
+                             "The guide will check the connection and ask for your confirmation before installing root.")
                 self.advance("root_ready")
             elif phase == "root_ready":
                 self.ui.say("\nChecking the temporary system before installation...")
