@@ -158,8 +158,9 @@ def reboot_verified(device, kind, proof):
 
 def build_matches(device, build):
     device.identify(unlocked=True)
+    profile = o.active_profile(device.binding)
     expected = {"serial": device.binding["ro.serialno"], "profile": o.slot_profile(device.binding)["id"],
-                "fingerprint": o.PROFILE["fingerprint"], "bootloader": o.PROFILE["bootloader"],
+                "fingerprint": profile["fingerprint"], "bootloader": profile["bootloader"],
                 "slot": device.binding["ro.boot.slot_suffix"]}
     o.require(all(build.get(k) == v for k, v in expected.items()), "DSU build binding mismatch")
     o.require(build.get("single_use_required") is True and build.get("root_helper_autostart") is False,
@@ -387,16 +388,31 @@ def install_root(device, args):
     request = read(args.stage.parent / "boot-request.json")
     o.require(request["stage_sha256"] == o.digest(args.stage), "Root DSU boot request missing")
     o.require(state(device) == "running\ninstalled\ndisabled", "Root DSU is not running disabled")
+    # Confirm we are in the DSU boot before touching any settings.
+    boot = device.boot_id()
+    o.require(boot != stage["boot_id"], "DSU did not reboot")
     # Bypass the Google TV setup wizard if it is still running.
+    # Boot-ID is confirmed above before this runs, so these writes land
+    # on the DSU image, not on the original Android.
     # The DSU image pre-embeds the ADB key so the connection works before setup
     # completes, but the wizard blocks activation on slow or VPN connections.
-    # These two settings skip it without requiring any TV interaction.
     device.shell("bypass-setup-provisioned", "settings", "put", "global",
                  "device_provisioned", "1", check=False)
     device.shell("bypass-setup-complete", "settings", "put", "secure",
                  "user_setup_complete", "1", check=False)
-    boot = device.boot_id()
-    o.require(boot != stage["boot_id"], "DSU did not reboot")
+    # ROW (jarvis2_row) devices: the DSU/init_boot hash checks below use the US
+    # stock hash. The ROW device has a different stock init_boot (different firmware
+    # build). The DSU root path is not hardware-verified for ROW; use fastboot instead.
+    # See README — Canada/ROW section for the fastboot alternative.
+    if o.is_row_device(device.binding):
+        raise o.Stop(
+            "ROW (jarvis2_row) device detected. The DSU root installation path "
+            "uses US init_boot hash checks that do not apply to your device. "
+            "Use the fastboot alternative instead:\n"
+            "  adb reboot fastboot\n"
+            "  fastboot flash init_boot_a <work/session/patched-init_boot.img>\n"
+            "See the README Canada/ROW section for full instructions."
+        )
     o.require(device.text("dsu-helper-hash", "sha256sum", "/system/bin/onn26-su").split()[0] == build["helper_sha256"],
               "Unexpected root helper")
     attempt = journal(device, "root-install-attempt.json")

@@ -135,7 +135,7 @@ def validate_identity(props, unlocked=False):
     require(re.fullmatch(r"(?:JUSA|JCA)[A-Za-z0-9]+", props.get("ro.serialno", "")),
             "Missing or unexpected jarvis2 hardware serial")
     require(PROFILE["abi"] in props.get("ro.product.cpu.abilist", "").split(","),
-            "Unsupported userspace ABI")
+            "Unsupported userspace ABI")  # ABI is identical on US and ROW; PROFILE is intentional here
     if unlocked:
         require(all(props.get(k) == v for k, v in UNLOCKED.items()),
                 "Post-reboot Android unlock properties are not proved")
@@ -276,8 +276,9 @@ def unlock(device, accepted):
     save(attempt, {"at": now(), "binding": device.binding, "boot_id": boot,
                    "session": str(device.s.path), "remote": remote,
                    "max_write_invocations": 1, "automatic_retry": False}, exclusive=True)
+    profile = active_profile(props)
     args = [remote + "/unlock_once", "--unlock-once", props["ro.serialno"],
-            active_profile(props)["fingerprint"], active_profile(props)["bootloader"],
+            profile["fingerprint"], profile["bootloader"],
             device.binding["ro.boot.slot_suffix"], boot,
             remote + "/attempt-consumed"]
     result = device.shell("unlock-once", *args, timeout=15, check=False)
