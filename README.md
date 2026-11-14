@@ -1,15 +1,9 @@
-**If you found this useful, consider donating.** I had to purchase two units at
-eBay prices to get this working. I bricked the first one.
+# 2026 onn 4K Pro — unlock and permanent root
 
-If you'd like to send a tip:
-
-- **Ethereum:** `0x994f4605d07049490687c1B64856995723f2d111` (**only on the Ethereum network**)
-- **Solana:** `CUDbdRSngRAoky9EyVVoUFH1nTWCgAs23iR9YRWuDZJC` (**only on the Solana network**)
-- **Bitcoin:** `3QjXzKrHKqV9QZ98ZU5JHkP1bZfx2q4Y6N` (**only on the Bitcoin network**)
+> **This fork adds Canada/ROW (`jarvis2_row`) support.** See the [Canada/ROW section](#canadarow-variant-jarvis2_row) below.
+> Original work by [openensemble](https://github.com/openensemble/onn-4k-pro-2026-unlock-root) — full credit to them for discovering the AVB TA unlock method and building the guided installer. This fork extends it.
 
 ---
-
-# 2026 onn 4K Pro — unlock and permanent root
 
 [**Project website — compatibility, setup and measured results**](https://openensemble.github.io/onn-4k-pro-2026-unlock-root/)
 
@@ -27,7 +21,7 @@ A USB data cable or USB drive is not required.
 
 **Measured result, November 10, 2026:** persistent unlock and permanent
 **Magisk 30.7** root worked on one replacement unit on **slot B**. Root survived normal Android
-boot and Magisk’s additional-setup reboot. The original Android installation
+boot and Magisk's additional-setup reboot. The original Android installation
 returned, SELinux remained **Enforcing**, the flashed image matched its readback,
 and the temporary DSU installation was removed. No temporary-root exploit or
 custom startup script was used.
@@ -77,6 +71,81 @@ already-unlocked onn skips the unlock step. Acceptance is saved for the selected
 An independent way to restore a bad root installation has **not been proven**.
 A stock backup does not guarantee recovery. Read the [recovery details](docs/RECOVERY.md).
 
+---
+
+## Canada/ROW variant (`jarvis2_row`)
+
+**Hardware verified on:** JCA2627000951, URO3.260203.009.A2 / 15016191, bootloader 01.01.260304.134947, November 14, 2026.
+
+The Canadian/international onn 4K Pro ships with a `jarvis2_row` firmware variant. It uses
+identical hardware to the US model — same Amlogic S905X5M SoC, same partition layout, same
+AVB Trusted Application misconfiguration. The guide auto-detects the ROW variant from the
+device fingerprint and applies the correct identity values.
+
+| Item | Canada/ROW value |
+| --- | --- |
+| Device codename | `jarvis2` (same hardware as US) |
+| Firmware variant | `jarvis2_row` |
+| Build ID / incremental | **URO3.260203.009.A2 / 15016191** |
+| Bootloader | **01.01.260304.134947** |
+| Serial prefix | **JCA** (US is JUSA) |
+| Partition layout | Identical to US (`init_boot_a` = `mmcblk0p22`, `init_boot_b` = `mmcblk0p23`) |
+| ABI | `armeabi-v7a` (identical to US) |
+
+### What was verified on hardware
+
+- AVB TA unlock: `secure_lock_state` 1→0, 1 write invocation ✅
+- Magisk 30.7 root installed and verified ✅
+- Widevine L1 preserved post-unlock ✅
+- SELinux: Enforcing ✅
+- Automatic OTA updates disabled ✅
+
+### How to run it
+
+The guide works exactly the same as for the US model — no flags or changes needed:
+
+```sh
+git clone https://github.com/kushmint/onn-4k-pro-2026-unlock-root.git
+cd onn-4k-pro-2026-unlock-root
+python3 onn2026.py
+```
+
+The guide detects `jarvis2_row` automatically and displays a note explaining
+that the US OTA is used as the firmware source (the init_boot image is fully
+compatible — both models share the same S905X5M GKI ramdisk).
+
+### Known limitation — root installation path
+
+The ROW variant ships on its latest available firmware with no OTA update available.
+The full **network-only DSU path** (the default for US units) uses the US OTA partitions
+to build a temporary Android system. The init_boot from that OTA is confirmed compatible
+with ROW hardware, but **DSU boot of the US system image on a ROW device has not yet been
+hardware-verified**. The guide will attempt this path and display a note if it reaches
+the DSU boot step.
+
+If the DSU boot step fails, use the **fastboot alternative** (requires a USB-A cable):
+
+```sh
+# After unlock, the guide will have produced a Magisk-patched init_boot.
+# Connect the onn via USB-A cable, then:
+adb reboot fastboot
+# Wait for fastbootd prompt
+fastboot flash init_boot_a <path-to-magisk-patched-init_boot.img>
+fastboot reboot
+# Open Magisk on the TV and complete additional setup
+```
+
+The patched image is saved in `work/<session>/patched-init_boot.img` after the
+`prepare-root` step completes.
+
+### Help wanted
+
+If you have a Canadian onn on **older ROW firmware** (any build before 15016191), check
+for a system update and post the OTA URL here. That URL is the missing piece to
+make the network-only DSU path hardware-verified for ROW devices.
+
+---
+
 ## What you need
 
 - An x86-64 Linux computer with Python 3.10+ and at least **12 GiB free**.
@@ -105,7 +174,7 @@ tools before unlocking. The first matching firmware download is about 911 MB.
 Open a terminal on your Linux computer. Get the files and start the walkthrough:
 
 ```sh
-git clone https://github.com/openensemble/onn-4k-pro-2026-unlock-root.git
+git clone https://github.com/kushmint/onn-4k-pro-2026-unlock-root.git
 cd onn-4k-pro-2026-unlock-root
 python3 onn2026.py
 ```
@@ -252,10 +321,9 @@ cannot extract files into a directory. Upgrade the computer's EROFS tools using
 
 ## Collect a slot-A diagnostic report
 
-For a compatibility question such as [issue #2](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/2),
-run the separate read-only collector. It accepts **slot A or B**, including a
-locked 2026 `jarvis2`. The report distinguishes slots accepted by the installer
-from slots with hardware-verified unlock/root results.
+Run the separate read-only collector. It accepts **slot A or B**, including a
+locked 2026 `jarvis2` or `jarvis2_row`. The report distinguishes slots accepted
+by the installer from slots with hardware-verified unlock/root results.
 Only Python 3.10+ and Android platform-tools (`adb`) are needed; no root, NDK
 or firmware download is required.
 
@@ -293,11 +361,16 @@ profile and active slot unchanged when collecting a report.
 
 ## What was tested
 
-The underlying unlock, DSU return, DSU root console, single init_boot flash,
-readback, Magisk setup and subsequent root were measured on one supported unit.
-The packaged builder completed a clean build and metadata/content round trip;
-its helper’s loaded ELF sections match the tested helper for the same binding.
+**US jarvis2 (openensemble):** The underlying unlock, DSU return, DSU root console,
+single init_boot flash, readback, Magisk setup and subsequent root were measured on
+one supported unit. The packaged builder completed a clean build and metadata/content
+round trip; its helper's loaded ELF sections match the tested helper for the same binding.
 The packaged permanent-root verifier was also run on that unit.
+
+**Canada/ROW jarvis2_row (this fork):** AVB TA unlock, Magisk 30.7 root via fastboot
+flash of Magisk-patched US init_boot, Widevine L1 preservation, and OTA update
+blocking were verified on hardware (JCA2627000951, November 14, 2026). DSU boot of
+the US system image on ROW hardware has not yet been hardware-verified.
 
 The host tests cover identity/slot/boot mismatches, prior attempts, enable/reboot
 failures, interrupted writes, changed IP addresses, other onns at an old address,
@@ -311,9 +384,17 @@ responses. See the
 ## What was not tested
 
 - Recovery after a power loss or an unbootable modified `init_boot` image.
+- DSU boot of the US system image on `jarvis2_row` (ROW/Canada) hardware.
 
 Passing the tests does not guarantee bug-free behavior or recovery from a failed
 installation. See the [recovery limitations](docs/RECOVERY.md).
+
+## Credits
+
+Original unlock method, guided installer, safety architecture, and all initial
+hardware verification by [openensemble](https://github.com/openensemble/onn-4k-pro-2026-unlock-root).
+Canada/ROW (`jarvis2_row`) support, slot diagnostic extension, and ROW hardware
+verification by [kushmint](https://github.com/kushmint).
 
 ## Licenses
 
