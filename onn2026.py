@@ -94,7 +94,11 @@ def parse_lock_state(text):
 
 
 def slot_profile(binding):
-    """Select only the explicitly bound slot; never default or change slots."""
+    """Select only the explicitly bound slot; never default or change slots.
+
+    Both jarvis2 (US) and jarvis2_row (Canada/ROW) use the same slot layout,
+    so PROFILE["slots"] applies to both variants.
+    """
     slot = binding.get("ro.boot.slot_suffix")
     require(slot in ("_a", "_b") and slot in PROFILE["slots"],
             "Unsupported or missing active slot: ro.boot.slot_suffix")
@@ -105,14 +109,30 @@ def root_partition(binding):
     return "/dev/block/by-name/" + slot_profile(binding)["root_partition"]
 
 
+ROW_PROFILE = {
+    "device": "jarvis2",
+    "fingerprint": "onn/jarvis2_row/jarvis2:14/URO3.260203.009.A2/15016191:user/release-keys",
+    "bootloader": "01.01.260304.134947",
+}
+
+
+def active_profile(props):
+    """Return PROFILE for US jarvis2 or ROW_PROFILE for jarvis2_row."""
+    fp = props.get("ro.build.fingerprint", "")
+    if "jarvis2_row" in fp:
+        return ROW_PROFILE
+    return PROFILE
+
+
 def validate_identity(props, unlocked=False):
-    expected = {"ro.product.device": PROFILE["device"],
-                "ro.build.fingerprint": PROFILE["fingerprint"],
-                "ro.bootloader": PROFILE["bootloader"]}
+    profile = active_profile(props)
+    expected = {"ro.product.device": profile["device"],
+                "ro.build.fingerprint": profile["fingerprint"],
+                "ro.bootloader": profile["bootloader"]}
     for key, value in expected.items():
         require(props.get(key) == value, "Unsupported or changed device: " + key)
     slot_profile(props)
-    require(re.fullmatch(r"JUSA[A-Za-z0-9]+", props.get("ro.serialno", "")),
+    require(re.fullmatch(r"(?:JUSA|JCA)[A-Za-z0-9]+", props.get("ro.serialno", "")),
             "Missing or unexpected jarvis2 hardware serial")
     require(PROFILE["abi"] in props.get("ro.product.cpu.abilist", "").split(","),
             "Unsupported userspace ABI")
@@ -257,7 +277,8 @@ def unlock(device, accepted):
                    "session": str(device.s.path), "remote": remote,
                    "max_write_invocations": 1, "automatic_retry": False}, exclusive=True)
     args = [remote + "/unlock_once", "--unlock-once", props["ro.serialno"],
-            PROFILE["fingerprint"], PROFILE["bootloader"], device.binding["ro.boot.slot_suffix"], boot,
+            active_profile(props)["fingerprint"], active_profile(props)["bootloader"],
+            device.binding["ro.boot.slot_suffix"], boot,
             remote + "/attempt-consumed"]
     result = device.shell("unlock-once", *args, timeout=15, check=False)
     save(device.s.path / "unlock-execution.json", result)
@@ -302,6 +323,22 @@ def download(url, destination, expected, expected_size=None):
     require(not destination.exists(), "Download destination appeared; refusing replacement")
     temporary.rename(destination)
     return destination
+
+
+def is_row_device(props):
+    """Return True if props are from a jarvis2_row (Canada/ROW) device."""
+    return "jarvis2_row" in props.get("ro.build.fingerprint", "")
+
+
+ROW_OTA_NOTE = (
+    "Note: your onn is the Canada/ROW variant (jarvis2_row). "
+    "The US firmware OTA is used here because both models share the same "
+    "S905X5M hardware and GKI ramdisk — the init_boot image is fully compatible. "
+    "The DSU system image from the US OTA should also boot on ROW hardware, "
+    "but this has not yet been hardware-verified on a ROW unit. "
+    "If the DSU boot step fails, use the fastboot alternative: "
+    "adb reboot fastboot, then fastboot flash init_boot_a <magisk-patched-init_boot.img>."
+)
 
 
 def fetch_inputs(session):

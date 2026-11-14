@@ -1,11 +1,11 @@
 {
   "bin/armeabi-v7a/read_state": "03d2c353a7b748767b280370ff656fd8cb10040c812bc42d99756b9efa788460",
-  "bin/armeabi-v7a/unlock_once": "9f487857bc384b5cd71b7b70e0d0652d9b8098efe0f63fb8ac2ac5af59e410b1",
+  "bin/armeabi-v7a/unlock_once": "bbac788f47240dbe16b6521925757edc239bd82f351113829eeb50b999eb7606",
   "connection.py": "62e39835e35164c49654f091c125f59a33f0bf73c5f264cd2ffa40bf73367716",
   "connection_identity.py": "ff670820bd8c5f8c8464e458c334f0a8d39ca460e870c636396f80307de664f6",
   "console_ui.py": "a28cc561f8bdeb7f1b4c2bc1b2c0dab217e881be1fedb70d6725810ed6c3db94",
   "dsu_recovery.py": "98d91936b0b6a82b302428fc36568a1d0dd0f4526c48d130e389f775c1884314",
-  "guide.py": "c375183ef51177a0842fc3bf1bdd96938943b6f7af47df124653b160ebc81436",
+  "guide.py": "4e058887a4e0fb7defbb28b6815c235e2302f496b8f1b65519fb6094e60d7ecd",
   "guide_core.py": "a037ba135ec7060e0b99b2f29b073392c7d465d85ddc5a648fa89e53e80fd319",
   "host_build.py": "bffa562df29f75227f6bcdf3c0a095fa9436276df0c7b3612aa0816caa0a3457",
   "native/dsu_console.c": "398d7155dd60ec68d10f1bcaeab143adc9bde03c40053f36b2c8cc617d33367e",
@@ -13,8 +13,8 @@
   "native/read_state.c": "0389f266f6fb97e6f8a40a13d9d9f6a6dc3ab32b74256e993c614417dab9e3bf",
   "native/test_unlock_logic.c": "f2572b7b8c178a2523ceb3008ef8bf7b0ea86aba137e3d7742fd29daefe6ed2b",
   "native/unlock_logic.h": "eaacb379a85163e7f88737d69fe8c390d91f8b1db1bca8304c0667fd6a53d4a4",
-  "native/unlock_once.c": "f3c9e68c5ac2624fa54bba17dfa7c46e19702e644b63eb8541faaf9c52836845",
-  "onn2026.py": "04a7f9a35c8e765f49d5607d9bf145ab815aea7f8ea6e519716e495122b9fc2e",
+  "native/unlock_once.c": "bf2b21ebbcf660c09036f41ba16289e16d45c741c950e168571ac6a357b8d73e",
+  "onn2026.py": "f6b949a86b674c2373f89e38d24c9ee6ea88b79c754e7506cab7cd860a1d4c79",
   "profile.json": "34b478aa21d400b5fdd52eddcc258fe3a9aa4272c037909af78621791fc62d84",
   "root_workflow.py": "e02c00f48be904ae58aa59c8aec5d5ad957044d81a30aa3daa471a2b72fcfa3c",
   "tests/test_android_identity.py": "db1401db702e742019f6d5be8eddaa0a6aa97018ba5a7f769623dbb7d2665a37",
@@ -28,7 +28,7 @@
   "tests/test_host_build.py": "4c22267f2c97d307634a040673b05bb527b94564e40849c346b94e68d6247b07",
   "tests/test_interrupts.py": "2bb74027f59ff46ada0dc0cf7098efcc5b68919c7ed805c6c584f26ed93a6f31",
   "tests/test_reboots.py": "f3884cdf7ec500230000f4a2d9c9da6fee5f5e88dfe76af0116b34fc76d1e65e",
-  "tests/test_slot_report.py": "cb517c9d51decf7337b1965367fcbcd7c522e11cd9b05d279996aa68f6c07d4e",
+  "tests/test_slot_report.py": "0cd2a6b477fb8b85cb93a45e1a45a1b8d40ff36ed657ea1c498301cda39678a1",
   "tests/test_slots.py": "14d06e93ab7f795f9b991ad6f13ba3707f0a93f70f4e28e5e8171992f1e30bcc",
   "tests/test_workflow.py": "905b7b5f2347001b8e4dca774f7dc469331409fd07b3e246b34e76f8e483896c",
   "tools/build_dsu.py": "43c79b066adbc18305818ccc6bc9cb6232a60c4c9ccab9b2b24a99268c8aee99",
@@ -37,5 +37,5 @@
   "tools/erofs_tools.py": "5dee9ce07f98f94fc1a3867f649b907acedd94e1695e0a45153b81b94fa9c608",
   "tools/extract_dsu_ota.py": "4923a40c7f84d38eb48a3045b7c80daba199e854d86a244b8174df852fe8296a",
   "tools/extract_full_ota.py": "615ae835baf182d02dc90d0807b2ecd86885d9369f8312558eda26dd9d7a3c2e",
-  "tools/slot_report.py": "bbb305f4723ea573d25c191fd1e72b11d5aeaf0084fcc4b0c2cd2ceb80e0d10c"
+  "tools/slot_report.py": "57c5c38ceea2014a2e2c3ccd6e25be3882d1036267bf122ef81337094e89c80e"
 }
