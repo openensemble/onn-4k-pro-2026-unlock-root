@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect a read-only jarvis2 slot report without using the unlock installer."""
+"""Collect a read-only jarvis2 / jarvis2_row slot report without using the unlock installer."""
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -53,9 +53,14 @@ def network_target(value):
     return f"{address}:{port}"
 
 
+KNOWN_SERIAL_PREFIXES = ("JUSA", "JCA")  # US: JUSA, Canada/ROW: JCA
+
+
 def hardware_serial(value):
-    if not re.fullmatch(r"JUSA[A-Za-z0-9]+", value):
-        raise argparse.ArgumentTypeError("Use the jarvis2 hardware serial beginning with JUSA")
+    if not any(re.fullmatch(prefix + r"[A-Za-z0-9]+", value) for prefix in KNOWN_SERIAL_PREFIXES):
+        raise argparse.ArgumentTypeError(
+            "Use the jarvis2 hardware serial beginning with JUSA (US) or JCA (Canada/ROW)"
+        )
     return value
 
 
@@ -167,7 +172,8 @@ class Collector:
                 raise Stop("Malformed device identity response; collection stopped.")
             values[key] = value
         self.secrets.update(values.get(key, "") for key in ("ro.serialno", "boot_id"))
-        if (not re.fullmatch(r"JUSA[A-Za-z0-9]+", values.get("ro.serialno", ""))
+        if (not any(re.fullmatch(prefix + r"[A-Za-z0-9]+", values.get("ro.serialno", ""))
+                    for prefix in KNOWN_SERIAL_PREFIXES)
                 or values.get("ro.product.device") != "jarvis2"):
             raise Stop("The selected device is not an identified 2026 jarvis2 onn.")
         if self.expected_serial and values["ro.serialno"] != self.expected_serial:
@@ -306,7 +312,7 @@ class Collector:
             if isinstance(value, str):
                 for secret in sorted(filter(None, self.secrets), key=len, reverse=True):
                     value = value.replace(secret, "[redacted]")
-                return re.sub(r"JUSA[A-Za-z0-9]+", "[redacted]", value)
+                return re.sub(r"(?:JUSA|JCA)[A-Za-z0-9]+", "[redacted]", value)
             return value
         return scrub(self.report)
 
