@@ -244,7 +244,8 @@ def stage_dsu(device, args):
                "enabled": False, "automatic_retry": False}
     o.save(attempt, request, exclusive=True)
     # A transfer timeout never initiates installation and is never automatically retried.
-    device.call("push-dsu", "push", str(archive), remote, timeout=180)
+    # 600 s allows for slower connections (VPN, international users).
+    device.call("push-dsu", "push", str(archive), remote, timeout=600)
     o.require(device.text("archive-readback", "sha256sum", remote, timeout=30).split()[0] == expected,
               "Uploaded DSU archive changed")
     device.identify(unlocked=True)
@@ -386,6 +387,14 @@ def install_root(device, args):
     request = read(args.stage.parent / "boot-request.json")
     o.require(request["stage_sha256"] == o.digest(args.stage), "Root DSU boot request missing")
     o.require(state(device) == "running\ninstalled\ndisabled", "Root DSU is not running disabled")
+    # Bypass the Google TV setup wizard if it is still running.
+    # The DSU image pre-embeds the ADB key so the connection works before setup
+    # completes, but the wizard blocks activation on slow or VPN connections.
+    # These two settings skip it without requiring any TV interaction.
+    device.shell("bypass-setup-provisioned", "settings", "put", "global",
+                 "device_provisioned", "1", check=False)
+    device.shell("bypass-setup-complete", "settings", "put", "secure",
+                 "user_setup_complete", "1", check=False)
     boot = device.boot_id()
     o.require(boot != stage["boot_id"], "DSU did not reboot")
     o.require(device.text("dsu-helper-hash", "sha256sum", "/system/bin/onn26-su").split()[0] == build["helper_sha256"],

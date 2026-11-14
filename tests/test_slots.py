@@ -90,7 +90,8 @@ class Android(o.Device):
             assert flow.journal(self, "unlock-attempt.json").exists()
             stdout = json.dumps({"stage": "finished", "outcome": 0, "write_invocations": 1})
         elif label not in ("mkdir-root-staging", "readable-root-input", "remove-used-flasher",
-                           "flush-before-normal-reboot", "mkdir-writer", "chmod-writer", "remove-writer"):
+                           "flush-before-normal-reboot", "mkdir-writer", "chmod-writer", "remove-writer",
+                           "bypass-setup-provisioned", "bypass-setup-complete"):
             raise AssertionError((label, args))
         return {"returncode": 0, "timed_out": False, "stdout": stdout, "stderr": ""}
 
