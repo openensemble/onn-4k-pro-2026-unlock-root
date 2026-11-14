@@ -243,6 +243,13 @@ class SlotReportTests(unittest.TestCase):
                 sr.network_target(value)
         with self.assertRaises(argparse.ArgumentTypeError):
             sr.hardware_serial('"')
+        # Both US (JUSA) and Canada/ROW (JCA) serial prefixes are accepted
+        self.assertEqual(sr.hardware_serial("JUSA1234567890"), "JUSA1234567890")
+        self.assertEqual(sr.hardware_serial("JCA2627000951"), "JCA2627000951")
+        with self.assertRaises(argparse.ArgumentTypeError):
+            sr.hardware_serial("EUR1234567890")  # unknown prefix
+        with self.assertRaises(argparse.ArgumentTypeError):
+            sr.hardware_serial("JCA")  # prefix only, no suffix
 
     def test_cli_private_files_shareable_reports_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as temp:

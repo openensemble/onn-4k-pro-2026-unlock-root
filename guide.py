@@ -144,6 +144,9 @@ class Backend:
                 space = device.text("free-space", "df", "-k", "/data").splitlines()[-1].split()
                 o.require(len(space) >= 4 and space[3].isdigit() and int(space[3]) >= 8 * 1024 ** 2,
                           "Free at least 8 GiB on the onn before continuing.")
+                props = device.identify()
+                if o.is_row_device(props):
+                    self.ui.say("\n" + o.ROW_OTA_NOTE + "\n")
             else:
                 o.require(result["unlocked_on_current_boot"] and result["boot_completed"] == "1",
                           "Android has not finished an unlocked boot. Finish setup, then resume this check.")
@@ -153,6 +156,9 @@ class Backend:
         if phase in ("unlock_reboot", "install_reboot"):
             return flow.reboot_verified(device, phase.removesuffix("_reboot"), values["proof"])
         if phase == "fetch":
+            binding = connection.load(self.path)["binding"]
+            if o.is_row_device(binding):
+                self.ui.say("\n" + o.ROW_OTA_NOTE + "\n")
             return o.fetch_inputs(context.s)
         if phase == "patch":
             return o.prepare_root(device, values["stock_init_boot"], values["magisk_apk"])

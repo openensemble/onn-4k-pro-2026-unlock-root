@@ -94,7 +94,11 @@ def parse_lock_state(text):
 
 
 def slot_profile(binding):
-    """Select only the explicitly bound slot; never default or change slots."""
+    """Select only the explicitly bound slot; never default or change slots.
+
+    Both jarvis2 (US) and jarvis2_row (Canada/ROW) use the same slot layout,
+    so PROFILE["slots"] applies to both variants.
+    """
     slot = binding.get("ro.boot.slot_suffix")
     require(slot in ("_a", "_b") and slot in PROFILE["slots"],
             "Unsupported or missing active slot: ro.boot.slot_suffix")
@@ -319,6 +323,22 @@ def download(url, destination, expected, expected_size=None):
     require(not destination.exists(), "Download destination appeared; refusing replacement")
     temporary.rename(destination)
     return destination
+
+
+def is_row_device(props):
+    """Return True if props are from a jarvis2_row (Canada/ROW) device."""
+    return "jarvis2_row" in props.get("ro.build.fingerprint", "")
+
+
+ROW_OTA_NOTE = (
+    "Note: your onn is the Canada/ROW variant (jarvis2_row). "
+    "The US firmware OTA is used here because both models share the same "
+    "S905X5M hardware and GKI ramdisk — the init_boot image is fully compatible. "
+    "The DSU system image from the US OTA should also boot on ROW hardware, "
+    "but this has not yet been hardware-verified on a ROW unit. "
+    "If the DSU boot step fails, use the fastboot alternative: "
+    "adb reboot fastboot, then fastboot flash init_boot_a <magisk-patched-init_boot.img>."
+)
 
 
 def fetch_inputs(session):
