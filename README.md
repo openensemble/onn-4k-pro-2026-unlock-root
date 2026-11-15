@@ -26,15 +26,17 @@ same onn after IP changes, verifies permanent root, and turns off automatic syst
 A USB data cable or USB drive is not required.
 
 **Canada/ROW (`JCA` serial):** selecting the exact supported Canadian build opens
-a Canadian-only menu for **USB rooting or status**. Before proceeding, it explains
-that PR author kushmint reports successful USB root on Canadian slot A and that
-we have not independently tested this method on hardware. Users can accept that
-risk and continue. The walkthrough handles unlock when needed, prepares a
-US-sourced `init_boot` on the intended Canadian device, shows the bound USB flash
-commands for the owner to run, and verifies permanent root afterward.
-See [the Canada/ROW instructions](docs/ROW.md). Firmware comes from its official
-sources, not this repository. Canadian DSU rooting remains unavailable; the
-network-only DSU flow below applies to US units and does not offer USB rooting.
+a Canadian-only menu for **network DSU rooting, USB rooting or status**.
+Contributor kushmint reports successful network DSU root on Canadian slot A in
+[issue #5](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/5),
+following the earlier USB result. We have not independently tested either
+Canadian method on hardware; slot B has no separate Canadian hardware report.
+The network guide uses the pinned US OTA as its temporary-system and patch
+source, patches on the selected onn, and saves its current `init_boot` before
+flashing. That snapshot is not verified factory stock. Read and accept the
+disclosure before proceeding. See [the Canada/ROW instructions](docs/ROW.md).
+Firmware comes from its official sources, not this repository. US units use the
+network guide directly and do not receive a USB menu.
 
 **Measured result, November 10, 2026:** persistent unlock and permanent
 **Magisk 30.7** root worked on one replacement unit on **slot B**. Root survived normal Android
@@ -56,19 +58,22 @@ custom startup script was used.
 
 This is support for that **exact build**, not every Android 14 firmware.
 Other builds and Android versions are outside the guided root profile. The
-separate ROW profile supports the manual USB route described above. The older 2024
+separate ROW profile supports Canadian build 15016191 as described above. The older 2024
 `jarvis` uses a different project. The script checks these values and stops on a
 mismatch. Do not edit the profiles to bypass a mismatch.
 
 **Both active slots have successful unlock and root results on the supported
-firmware.** The project maintainer confirmed successful community slot-A
+US firmware.** The project maintainer confirmed successful community slot-A
 installations on November 13, 2026. Slot B has the measured hardware results above.
 See [the results and community update](docs/RESULTS.md).
 
 The installer uses the current active slot and never switches slots. Its DSU
 helper, backup, flash and verification are bound to that slot and physical unit.
-Before flashing, it checks the active partition's mapping, 8 MiB size and exact
-pinned stock-image hash, and saves a verified backup. If any check fails it
+Before flashing, it checks the active partition's mapping and 8 MiB size, saves
+a backup, and requires the partition still to match that backup at the write.
+US installations additionally require the pinned factory-stock hash; Canadian
+installations preserve a device snapshot without claiming it is factory stock.
+If any check fails it
 stops. A slot change also stops the saved workflow; the inactive slot is not
 used as a fallback. Existing slot-B connection and installation records remain
 valid, including completed or uncertain attempt journals.

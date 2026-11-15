@@ -1,10 +1,9 @@
 # Canada/ROW support
 
-The Canada/ROW addition comes from [kushmint's PR #4](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/pull/4).
-The contributor reports a successful AVB unlock and USB fastboot root on slot A.
-This project supports status, saved connections, reconnection, read-only slot
-reports, manual unlock, USB root image preparation and permanent-root verification
-for this exact identity:
+The Canada/ROW addition comes from [kushmint's PR #4](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/pull/4)
+and [network DSU report in issue #5](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/5).
+The contributor reports successful unlock, USB fastboot root and network DSU
+root on slot A. The guide supports both root methods for this exact identity:
 
 | Field | Canada/ROW value |
 | --- | --- |
@@ -19,8 +18,8 @@ for this exact identity:
 Both active slots are accepted and remain bound throughout an operation. The
 reported ROW hardware result is on **slot A**; ROW slot B has not been separately
 confirmed on hardware. The successful US A/B results do not serve as ROW results.
-No command switches the active slot. The PR author reports successful hardware
-use; **we have not independently tested this USB method on hardware**.
+No command switches the active slot. These are contributor hardware reports;
+**we have not independently tested either Canadian method on hardware**.
 
 ## Use the Canadian menu
 
@@ -32,9 +31,20 @@ python3 onn2026.py guide
 
 Only the exact Canadian identity above gets the **Canada/ROW options** menu:
 
-1. **Continue with USB rooting** — read the PR author's hardware report and the
-   testing/recovery limitations, then accept or decline the risks.
-2. **Show status only** — inspect the selected device without starting root setup.
+1. **Network DSU rooting** — recommended, no USB cable. Read the contributor's
+   report and testing/recovery limitations, then accept or decline the risks.
+2. **USB rooting** — the earlier method, with separate manual flash instructions.
+3. **Show status only** — inspect the selected device without starting root setup.
+
+The network route uses the same walkthrough as the US release: unlock only if
+needed, patch on this device, build the temporary images, test the first DSU boot
+and power-cycle back, then start the second DSU boot for root installation.
+The second temporary system starts network ADB on port 5555 with this computer's
+public key. Ethernet or Wi-Fi works. No Google account is required for debugging.
+The guide verifies original Android and permanent Magisk root after the flash,
+preserves the backup, removes its temporary system and disables automatic updates.
+It needs the Linux NDK and EROFS tools listed in the [main setup guide](../README.md).
+Network progress stays in `guide.json`; choose network DSU again to resume.
 
 The USB walkthrough checks platform-tools, skips unlock if already unlocked,
 or performs the existing one-time unlock and recovery-reset sequence if needed.
@@ -44,7 +54,7 @@ slot. Run those commands in another terminal, checking each result as instructed
 The guide does not run a USB flash or USB reboot itself. It then checks permanent
 root and disables automatic system-update scheduling.
 
-This route needs `adb`, `fastboot` and a USB data connection. No NDK or EROFS
+The USB route needs `adb`, `fastboot` and a USB data connection. No NDK or EROFS
 build tools are needed. Progress is saved separately in `usb-guide.json`.
 After leaving with `q`, run the guide again and choose USB rooting to resume.
 Once flash instructions have been shown, resuming proceeds to verification;
@@ -55,20 +65,42 @@ US units retain the DSU walkthrough and never receive this menu. The direct
 commands below are also available for owners who want to perform each step
 manually instead of using the menu.
 
-## DSU rooting is not available yet
+## Network DSU firmware identity and backups
 
-The ROW build differs from US build 15640252. We do not yet have a pinned ROW
-OTA, verified ROW partition images or a reference stock `init_boot` hash.
-DSU commands, including `guide --restart-dsu`, therefore stop before unlocking,
-resetting or preparing a DSU installation for a ROW unit. The Canadian menu uses
-the separate USB route. Its direct download, patch and verification commands
-require `--method usb-fastboot`; omitting it preserves the DSU refusal.
+The approved image source is the pinned **US 15640252 OTA**, downloaded from
+Google. It supplies the temporary system and the `init_boot` patched on this onn;
+it is not presented as a Canadian stock backup. There is no pinned Canadian OTA
+or reference Canadian factory `init_boot` hash in this release.
 
-The contributor's USB root result does not establish that a US stock image is
-a valid ROW backup, or that a US DSU image boots and passes this installer's
-stock-partition proof. Adding the guided path requires matching ROW firmware
-inputs and verification of both temporary boots, the original partition backup
-and permanent-root readback on ROW hardware.
+Canadian Android reports a combined fingerprint while running that temporary
+system: `onn/jarvis2_row/jarvis2:14/URO3.260203.035.A1/15640252:user/release-keys`.
+The installer accepts that exact value only when Android reports a running DSU.
+It keeps the original Canadian fingerprint in the saved binding and still
+requires the same physical serial, Canadian bootloader and active slot. Returning
+to original Android requires the native 15016191 fingerprint again.
+
+Before flashing, the temporary root console hashes the active `init_boot`, copies
+all 8 MiB to the computer and checks the copy against that hash. The flasher
+rechecks the live partition against the copy immediately before its single write.
+The receipt labels this `pre_flash_backup`, with `factory_stock_verified: false`.
+It may already contain earlier modifications; it is not proof of factory stock.
+After permanent root is verified, cleanup saves a compressed copy under
+`/data/adb/onn26-backups/<snapshot-sha256>/pre-flash-init_boot.img.gz` and retains
+the host copy. It does not put the snapshot in Magisk's factory-stock restore
+directory. A backup does not establish a working recovery transport.
+
+To abandon an unfinished DSU setup **before a permanent-root attempt**, use:
+
+```sh
+python3 onn2026.py guide --restart-dsu
+```
+
+This requires original Android and confirms removal before starting a fresh
+temporary-system cycle. It keeps receipts and backups and skips unlocking an
+already-unlocked unit. It does not erase a root-install attempt or bypass an
+already-rooted check. The `--reinstall` flag mentioned in issue #5 is a testing
+addition in the contributor's fork, not an option in this script. Use the saved
+verification/cleanup flow after a permanent installation.
 
 ## Check and save the selected onn
 
@@ -243,7 +275,7 @@ physical serial/firmware/slot, Magisk 30.7 root, SELinux Enforcing and an active
 partition hash matching this device's patched image. A successful flash command
 alone does not mark root as verified.
 
-Keep the work folder and receipts. The US DSU workflow, `install-root`, `cleanup-root`
+Keep the work folder and receipts. The network DSU workflow, `install-root`, `cleanup-root`
 and `guide --restart-dsu` do not apply to this manual USB route. No DSU image is
 created or uploaded. Android's automatic-update setting can be managed separately
 with `disable-updates`, `updates-status` and `enable-updates` using the saved

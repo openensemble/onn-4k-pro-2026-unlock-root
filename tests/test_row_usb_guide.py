@@ -182,7 +182,7 @@ class CanadianUsbGuideTests(unittest.TestCase):
     def test_status_menu_does_not_require_risk_consent_or_create_root_progress(self):
         self.setup_guide()
         self.path.unlink()
-        self.ui.read = lambda _: "2"
+        self.ui.read = lambda _: "3"
         self.ui.choose = lambda: self.fail("Status must not request root risk acceptance")
         with patch.object(usb, "Backend", return_value=self.backend), patch.object(o, "status", return_value={"read_only": True}):
             self.assertEqual(usb.start(SimpleNamespace(), self.selected, self.record, self.path, self.ui), 0)
@@ -215,7 +215,7 @@ class CanadianUsbGuideTests(unittest.TestCase):
         self.path.unlink()
         attempt = self.path.parent / "root-install-attempt.json"
         attempt.write_text('"preserve me"\n')
-        self.ui.read = lambda _: "1"
+        self.ui.read = lambda _: "2"
         with patch.object(usb, "Backend", return_value=self.backend), self.assertRaisesRegex(o.Stop, "Earlier installation attempts"):
             usb.start(SimpleNamespace(), self.selected, self.record, self.path, self.ui)
         self.assertEqual(attempt.read_text(), '"preserve me"\n')

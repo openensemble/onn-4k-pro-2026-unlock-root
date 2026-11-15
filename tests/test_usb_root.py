@@ -131,6 +131,25 @@ class UsbRootTests(unittest.TestCase):
                 self.assertNotIn("dd ", command)
                 self.assertFalse(any("flash" in c[0] or "reboot" in c[0] for c in device.calls))
 
+    def test_network_dsu_preparation_records_us_source_without_claiming_canadian_stock(self):
+        for slot in ("_a", "_b"):
+            device = Device(self.work / slot, self.patched, slot)
+            with patch.object(o, "lock_state", return_value=(0, BOOT)):
+                record = o.prepare_root(device, self.stock, self.apk)
+            self.assertEqual(record["root_method"], "dsu")
+            self.assertEqual(record["binding"], o.validate_identity(props(slot)))
+            self.assertEqual(record["patch_source_profile"], o.PROFILE["id"])
+            self.assertEqual(record["patch_source_image"]["sha256"], o.digest(self.stock))
+            self.assertFalse(record["original_device_backup"])
+            self.assertNotIn("stock_image", record)
+            self.assertNotIn("fastboot_partition", record)
+            self.assertFalse((device.s.path / "stock-init_boot.img").exists())
+            self.assertEqual(o.digest(device.s.path / "patch-source-init_boot.img"), o.digest(self.stock))
+            checked, _ = flow.patch_receipt(device, Path(record["patch_result"]))
+            self.assertEqual(checked["patched_image"]["sha256"], o.digest(self.patched))
+            self.assertEqual(sum(c[0] == "patch-local-image-only" for c in device.calls), 1)
+            self.assertFalse(any("flash" in c[0] or "reboot" in c[0] for c in device.calls))
+
     def test_us_units_reject_usb_before_download_preparation_or_verification(self):
         for slot in ("_a", "_b"):
             device = Device(self.work / slot, self.patched, slot)
@@ -152,23 +171,26 @@ class UsbRootTests(unittest.TestCase):
                 o.parser().parse_args([command, "--help"])
             self.assertNotIn("usb-fastboot", help_text.getvalue())
 
-    def test_fetch_usb_uses_pinned_us_source_only_with_explicit_row_selection(self):
+    def test_row_fetch_uses_pinned_us_source_for_each_root_method(self):
         device = Device(self.work, self.patched)
         cache = self.work / "cache/firmware"
         cache.mkdir(parents=True)
         shutil.copyfile(self.stock, cache / "init_boot.img")
         with patch.object(o, "ROOT", self.work), patch.object(o, "verify_files"), \
              patch.object(o, "download", return_value=self.apk) as download:
-            for binding, method in ((None, "usb-fastboot"), (device.binding, "dsu")):
+            for binding, method in ((None, "usb-fastboot"), (device.binding, "unknown-method")):
                 with self.assertRaises(o.Stop):
                     o.fetch_inputs(device.s, binding, method)
             download.assert_not_called()
-            result = o.fetch_inputs(device.s, device.binding, "usb-fastboot")
-            self.assertEqual(result["patch_source_profile"], o.PROFILE["id"])
-            self.assertFalse(result["original_device_backup"])
-            self.assertEqual(Path(result["stock_init_boot"]), cache / "init_boot.img")
-            download.assert_called_once_with(o.PROFILE["magisk_url"], self.work / "cache/Magisk-v30.7.apk",
-                                             o.PROFILE["magisk_apk_sha256"])
+            for method in ("dsu", "usb-fastboot"):
+                download.reset_mock()
+                result = o.fetch_inputs(device.s, device.binding, method)
+                self.assertEqual(result["root_method"], method)
+                self.assertEqual(result["patch_source_profile"], o.PROFILE["id"])
+                self.assertFalse(result["original_device_backup"])
+                self.assertEqual(Path(result["stock_init_boot"]), cache / "init_boot.img")
+                download.assert_called_once_with(o.PROFILE["magisk_url"], self.work / "cache/Magisk-v30.7.apk",
+                                                 o.PROFILE["magisk_apk_sha256"])
 
     def test_cli_dispatch_preserves_explicit_method_and_saved_regional_binding(self):
         device = Device(self.work, self.patched)
@@ -215,10 +237,11 @@ class UsbRootTests(unittest.TestCase):
 
     def test_usb_receipt_cannot_enter_default_dsu_or_writer_paths(self):
         device, _, args = self.prepare()
-        with self.assertRaisesRegex(o.Stop, "matching ROW firmware"):
+        with self.assertRaisesRegex(o.Stop, "another root method"):
             flow.patch_receipt(device, args.patch_result)
-        with patch.object(o, "verify_files"), self.assertRaisesRegex(o.Stop, "matching ROW firmware"):
-            flow.run(device, SimpleNamespace(command="install-root", method="usb-fastboot"))
+        with patch.object(o, "verify_files"), self.assertRaisesRegex(o.Stop, "another root method"):
+            flow.run(device, SimpleNamespace(command="install-root", method="usb-fastboot",
+                                              accept_unproven_recovery=True, patch_result=args.patch_result))
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
             o.parser().parse_args(["build-dsu", "--ndk", "unused", "--method", "usb-fastboot"])
 

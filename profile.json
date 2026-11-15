@@ -13,7 +13,10 @@
       "bootloader": "01.01.260304.134947",
       "serial_prefixes": ["JCA"],
       "abi": "armeabi-v7a",
-      "dsu_root_supported": false,
+      "dsu_root_supported": true,
+      "dsu_fingerprint": "onn/jarvis2_row/jarvis2:14/URO3.260203.035.A1/15640252:user/release-keys",
+      "dsu_source_profile": "jarvis2-15640252",
+      "pre_flash_backup_policy": "capture-device",
       "usb_fastboot_patch_source_profile": "jarvis2-15640252",
       "init_boot_size": 8388608,
       "slots": {
@@ -23,7 +26,8 @@
           "root_block_path": "/dev/block/mmcblk0p22",
           "root_method_hardware_verified": false,
           "unlock_hardware_verified": true,
-          "fastboot_root_hardware_reported": true
+          "fastboot_root_hardware_reported": true,
+          "dsu_root_hardware_reported": true
         },
         "_b": {
           "id": "jarvis2-row-15016191-b",
@@ -31,7 +35,8 @@
           "root_block_path": "/dev/block/mmcblk0p23",
           "root_method_hardware_verified": false,
           "unlock_hardware_verified": false,
-          "fastboot_root_hardware_reported": false
+          "fastboot_root_hardware_reported": false,
+          "dsu_root_hardware_reported": false
         }
       }
     }

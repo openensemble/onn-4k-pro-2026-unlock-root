@@ -95,6 +95,7 @@ def build(args):
                "ro.boot.slot_suffix": args.slot, "ro.product.cpu.abilist": profile["abi"]}
     o.require_dsu_support(binding)
     o.validate_identity(binding)
+    source = o.dsu_source_profile(binding)
     slot = o.slot_profile(binding)
     progress("Checking the computer's EROFS tools...")
     check_erofs_tools(args.mkfs_erofs, args.fsck_erofs)
@@ -109,7 +110,7 @@ def build(args):
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     roots = {}
-    for name, pin in profile["dsu_partitions"].items():
+    for name, pin in source["dsu_partitions"].items():
         progress("Checking the stock " + name + " image...")
         image = args.images / (name + ".img")
         o.require(image.stat().st_size == pin["size"] and o.digest(image) == pin["sha256"],
@@ -124,7 +125,7 @@ def build(args):
     progress("Copying the temporary system's files...")
     shutil.copytree(roots["system"], tree, symlinks=True)
 
-    header = {"ONN26_SERIAL": args.serial, "ONN26_FINGERPRINT": profile["fingerprint"],
+    header = {"ONN26_SERIAL": args.serial, "ONN26_FINGERPRINT": o.dsu_fingerprint(binding),
               "ONN26_BOOTLOADER": profile["bootloader"], "ONN26_SLOT": args.slot}
     (out / "onn26_binding.h").write_text("".join(
         "#define " + k + " " + json.dumps(v) + "\n" for k, v in header.items()))
@@ -222,11 +223,11 @@ def build(args):
     shutil.copyfile(erofs, image)
     avb = [sys.executable, args.avbtool]
     command([*avb, "add_hashtree_footer", "--image", image, "--partition_name", "system",
-             "--partition_size", str(profile["dsu_partitions"]["system"]["size"]),
+             "--partition_size", str(source["dsu_partitions"]["system"]["size"]),
              "--algorithm", "NONE", "--hash_algorithm", "sha256", "--block_size", "4096",
              "--do_not_generate_fec", "--salt", "9c36d1cb9303ad93fda0f340d31b24ccf8892ee3a1d9198bb6b94acf0772d625",
              "--prop", "com.android.build.system.os_version:14", "--prop",
-             "com.android.build.system.fingerprint:" + profile["fingerprint"], "--prop",
+             "com.android.build.system.fingerprint:" + source["fingerprint"], "--prop",
              "com.android.build.system.security_patch:2026-06-01"], out / "avb-footer.log",
              "Adding Android verification data")
     command([*avb, "verify_image", "--image", image], out / "avb-verify.log",
@@ -234,6 +235,8 @@ def build(args):
     compress(image, out / "system.root.raw.gz")
     compress(args.images / "system.img", out / "system.stock.raw.gz")
     result = {"at": o.now(), "profile": slot["id"], "serial": args.serial,
+              "source_profile": source["id"], "source_fingerprint": source["fingerprint"],
+              "dsu_fingerprint": o.dsu_fingerprint(binding),
               "fingerprint": profile["fingerprint"], "bootloader": profile["bootloader"],
               "slot": args.slot, "system_bytes": image.stat().st_size,
               "root_image_sha256": o.digest(image), "helper_sha256": o.digest(out / "onn26-su"),

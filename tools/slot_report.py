@@ -208,10 +208,14 @@ class Collector:
             values = self.snapshot()
             self.report["properties"] = {key: values.get(key) or None for key in PROPERTIES}
             profiles = (self.profile, *self.profile.get("variants", {}).values())
-            profile = next((p for p in profiles if p["fingerprint"] == values["ro.build.fingerprint"]), self.profile)
+            def firmware_matches(profile):
+                return (values["ro.build.fingerprint"] == profile["fingerprint"]
+                        or (profile.get("dsu_fingerprint") == values["ro.build.fingerprint"]
+                            and values.get("ro.gsid.image_running") == "1"))
+            profile = next((p for p in profiles if firmware_matches(p)), self.profile)
             self.report["profile_comparison"] = {
                 "compared_profile": profile["id"],
-                "firmware_matches": values["ro.build.fingerprint"] == profile["fingerprint"],
+                "firmware_matches": firmware_matches(profile),
                 "bootloader_matches": values["ro.bootloader"] == profile["bootloader"],
                 "serial_region_matches": any(values["ro.serialno"].startswith(p) for p in profile["serial_prefixes"]),
                 "abi_matches": profile["abi"] in values.get("ro.product.cpu.abilist", "").split(","),
@@ -223,6 +227,8 @@ class Collector:
             matches = all(comparison[key] for key in ("firmware_matches", "bootloader_matches", "abi_matches", "serial_region_matches"))
             comparison["dsu_root_supported"] = matches and profile.get("dsu_root_supported") is True
             slot = profile["slots"].get(values["ro.boot.slot_suffix"], {})
+            if profile.get("dsu_source_profile"):
+                comparison["dsu_root_hardware_reported"] = matches and slot.get("dsu_root_hardware_reported") is True
             if profile.get("usb_fastboot_patch_source_profile"):
                 comparison["fastboot_root_hardware_reported"] = matches and slot.get("fastboot_root_hardware_reported") is True
             for kind in ("unlock", "root_method"):

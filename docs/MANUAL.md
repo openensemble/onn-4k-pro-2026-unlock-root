@@ -3,10 +3,11 @@
 For the normal guided walkthrough, run `python3 onn2026.py` from the repository
 folder. You do not need to enter the commands below when using the guide.
 
-The root and DSU commands here require the pinned **US 15640252** firmware.
-For **Canada/ROW 15016191**, use the separate [manual unlock and USB fastboot
-instructions](ROW.md). The USB route explicitly uses a pinned US patch source;
-it does not provide original ROW backup images or enable ROW DSU rooting.
+The network root and DSU commands support pinned **US 15640252** and
+**Canada/ROW 15016191** firmware. Canadian users should first read the
+[community report, combined DSU identity and backup limitations](ROW.md).
+The Canadian route uses the pinned US image source with a separately checked
+device snapshot. The optional Canadian USB method has its own instructions there.
 
 These lower-level commands are for inspecting receipts or carrying out a
 reviewed manual workflow. Do not mix them into an active guide. Read the
@@ -226,20 +227,22 @@ ONN26_INSTALL="work/REPLACE_WITH_INSTALL_SESSION/install-result.json"
 ```
 
 The script requires a running but already-disabled single-use root DSU. It
-checks the helper, original image, prepared patch and device identity; saves a
-binary stock backup; runs all flash guards in check-only mode on Android; and
+checks the helper, current image, prepared patch and device identity; saves a
+binary backup; runs all flash guards in check-only mode on Android; and
 records host and device attempt markers before the only partition write.
 It writes exactly 8 MiB to the bound active `init_boot_a` or `init_boot_b`,
 flushes it, reads it back independently,
 and removes the flasher. It does not write another slot, vbmeta or bootloader,
 and does not install a script at boot.
 
-Both slots have successful unlock and root results: community reports for slot A
-and measured hardware verification for slot B. The selected slot comes from the device's
+Both US slots have successful unlock and root results: community reports for slot A
+and measured hardware verification for slot B. Canadian slot A has a contributor
+DSU report; Canadian slot B has no separate hardware report. The selected slot comes from the device's
 saved identity, including when building the DSU helper. The standalone offline
 builder requires an explicit `--slot _a` or `--slot _b`; the workflow supplies
 the verified slot automatically. The active partition's exact mapping, size and
-stock hash must pass before any firmware write. Never change the active slot or
+backup hash must pass before any firmware write. US units also require the
+pinned factory-stock hash. Never change the active slot or
 edit saved bindings to get past a refusal.
 
 Continue only after `verified_flash: true`. If any write fails or times out,
@@ -281,8 +284,10 @@ steps are not repeated to recover a missed permission prompt.
 
 Verification requires original Android, Magisk **30.7 / 30700**, UID **0**,
 SELinux **Enforcing**, complete Magisk runtime files and the exact patched
-partition hash. Guest-only root does not pass. Cleanup saves a verified stock
-backup in Magisk’s backup directory and removes this workflow’s DSU and downloads.
+partition hash. Guest-only root does not pass. Cleanup saves the verified US stock
+backup in Magisk’s backup directory. On Canadian units it preserves the device
+snapshot separately under `/data/adb/onn26-backups/`; it is not verified factory
+stock. Cleanup then removes this workflow’s DSU and downloads.
 The local backups and attempt records remain in ignored `work/`.
 
 **9. Disable automatic system updates.**

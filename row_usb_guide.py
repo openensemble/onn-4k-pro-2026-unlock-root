@@ -11,7 +11,7 @@ import guide
 import onn2026 as o
 import root_workflow as flow
 from guide_core import (DEBUGGING_SETUP, MAGISK_OPEN, PAGE_TITLES, RISK_TEXT, RISK_VERSION,
-                        ROOT_ACCESS_HELP, RootAccessUnavailable, initial_state, now, validate_state)
+                        ROOT_ACCESS_HELP, ROW_DSU_NOTICE, RootAccessUnavailable, initial_state, now, validate_state)
 
 NOTICE_VERSION = 1
 NOTICE = (
@@ -62,6 +62,7 @@ class Backend(guide.Backend):
                           "Free at least 2 GiB on the computer for the OTA, Magisk and receipts")
             return {"fastboot": fastboot, "dsu_tools_required": False}
         if phase in ("baseline", "unlocked_check"):
+            o.require_original_firmware(device.identify())
             result = o.status(device)
             o.require(flow.state(device) in ("normal", "installed\ndisabled"),
                       "Return to the original Android with DSU disabled before USB preparation")
@@ -227,14 +228,19 @@ class UsbGuide(guide.Guide):
 
 
 def start(args, selected, record, path, ui):
+    """Choose a Canadian route; return 'dsu' to continue the shared network guide."""
     o.patch_source_profile(record["binding"], "usb-fastboot")
     while True:
-        ui.page("Canada/ROW options", NOTICE + "\n\n1. Continue with USB rooting\n2. Show status only\nQ. Leave")
-        choice = ui.ask("Choose 1 or 2, or q to leave: ")
-        if choice in ("1", "2"):
+        ui.page("Canada/ROW options", ROW_DSU_NOTICE +
+                "\n\n1. Network DSU rooting (recommended; no USB cable)\n2. USB rooting\n3. Show status only\nQ. Leave")
+        choice = ui.ask("Choose 1, 2 or 3, or q to leave: ")
+        if choice in ("1", "2", "3"):
             break
+    if choice == "1":
+        o.require_dsu_support(record["binding"])
+        return "dsu"
     backend = Backend(args, selected, ui)
-    if choice == "2":
+    if choice == "3":
         context = backend.prepare("baseline")
         ui.say(json.dumps(o.status(context.device), indent=2))
         return 0

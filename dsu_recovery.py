@@ -111,6 +111,7 @@ def check_host(device, state):
 
 def original_android(device, expected_id=None, expected_boot=None):
     props = device.identify(unlocked=True)
+    o.require_original_firmware(props)
     o.require(props.get("sys.boot_completed") == "1", "Wait for original Android to finish starting before DSU restart.")
     current = device.text("restart-dsu-state", "gsi_tool", "status")
     o.require(current in ("normal", "installed\ndisabled"),

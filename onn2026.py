@@ -94,9 +94,12 @@ def parse_lock_state(text):
 
 
 def active_profile(binding):
-    """Select an exact firmware identity; regional profiles never inherit images."""
+    """Keep the native identity; recognize only a pinned guest on a running DSU."""
     for profile in (PROFILE, *PROFILE.get("variants", {}).values()):
         if binding.get("ro.build.fingerprint") == profile["fingerprint"]:
+            return profile
+        if (profile.get("dsu_fingerprint") and binding.get("ro.gsid.image_running") == "1"
+                and binding.get("ro.build.fingerprint") == profile["dsu_fingerprint"]):
             return profile
     raise Stop("Unsupported or changed device: ro.build.fingerprint")
 
@@ -104,18 +107,36 @@ def active_profile(binding):
 def require_dsu_support(binding):
     profile = active_profile(binding)
     require(profile.get("dsu_root_supported") is True,
-            "Canada/ROW firmware supports manual unlock and USB fastboot image preparation. "
-            "Guided DSU rooting is unavailable: matching ROW firmware images and stock "
-            "init_boot hashes have not been verified. See docs/ROW.md. "
-            "This command will not unlock, reset or install root on this firmware.")
+            "DSU rooting is not enabled for this exact firmware profile. See the supported firmware instructions.")
     return profile
 
 
+def dsu_fingerprint(binding):
+    profile = require_dsu_support(binding)
+    return profile.get("dsu_fingerprint", profile["fingerprint"])
+
+
+def dsu_source_profile(binding):
+    """Resolve an explicit image source separately from the target's firmware."""
+    profile = require_dsu_support(binding)
+    source_id = profile.get("dsu_source_profile", profile["id"])
+    require(source_id == PROFILE["id"], "Unpinned DSU image source")
+    require(profile["init_boot_size"] == PROFILE["init_boot_size"], "DSU source image size mismatch")
+    return PROFILE
+
+
+def require_original_firmware(props):
+    profile = active_profile(props)
+    require(props.get("ro.build.fingerprint") == profile["fingerprint"]
+            and props.get("ro.gsid.image_running") != "1",
+            "Return to the original Android firmware before this operation")
+
+
 def patch_source_profile(binding, method="dsu"):
-    """Explicit USB compatibility does not supply a regional stock backup or DSU inputs."""
+    """Resolve each approved method's image source without implying stock provenance."""
     require(method in ("dsu", "usb-fastboot"), "Unknown root method")
     if method == "dsu":
-        return require_dsu_support(binding)
+        return dsu_source_profile(binding)
     profile = active_profile(binding)
     require(profile.get("usb_fastboot_patch_source_profile") == PROFILE["id"]
             and profile["init_boot_size"] == PROFILE["init_boot_size"],
@@ -146,7 +167,6 @@ def root_partition(binding):
 def validate_identity(props, unlocked=False):
     profile = active_profile(props)
     expected = {"ro.product.device": profile["device"],
-                "ro.build.fingerprint": profile["fingerprint"],
                 "ro.bootloader": profile["bootloader"]}
     for key, value in expected.items():
         require(props.get(key) == value, "Unsupported or changed device: " + key)
@@ -162,7 +182,9 @@ def validate_identity(props, unlocked=False):
         require(all(props.get(k) == v for k, v in UNLOCKED.items()),
                 "Post-reboot Android unlock properties are not proved")
         require(props.get("sys.boot_completed") == "1", "Android boot is incomplete")
-    return {key: props[key] for key in IDENTITY}
+    # active_profile already checked the exact observed fingerprint and DSU flag.
+    # Receipts keep the native firmware identity across both temporary boots.
+    return {**{key: props[key] for key in IDENTITY}, "ro.build.fingerprint": profile["fingerprint"]}
 
 
 def verify_files():
@@ -280,6 +302,7 @@ def unlock(device, accepted):
             "erasing all user apps, accounts, settings and other local data. "
             "Read the instructions and supply --accept-data-loss.")
     props = device.identify()
+    require_original_firmware(props)
     profile = active_profile(props)
     state, boot = lock_state(device)
     if state == 0:
@@ -353,24 +376,23 @@ def fetch_inputs(session, binding=None, method="dsu"):
     # Without a selected device this explicitly downloads the default US inputs.
     require(binding is not None or method == "dsu",
             "USB fastboot preparation requires --connection or --target for the intended onn")
-    if binding is not None:
-        patch_source_profile(binding, method)
+    source = patch_source_profile(binding, method) if binding is not None else PROFILE
     verify_files()
     cache = ROOT / "cache"
     apk = download(PROFILE["magisk_url"], cache / "Magisk-v30.7.apk", PROFILE["magisk_apk_sha256"])
     stock = cache / "firmware" / "init_boot.img"
     if not stock.exists():
-        ota = download(PROFILE["ota_url"], cache / "jarvis2-15640252-full-ota.zip",
-                       PROFILE["ota_sha256"], PROFILE["ota_size"])
+        ota = download(source["ota_url"], cache / (source["id"] + "-full-ota.zip"),
+                       source["ota_sha256"], source["ota_size"])
         # Fixed full OTA only. The extractor rejects delta operations and checks
         # payload, operation and partition hashes before returning an image.
         session.run("extract-init-boot", [sys.executable, ROOT / "tools/extract_full_ota.py",
                     ota, stock.parent, "--partitions", "init_boot"], timeout=180)
-    require(digest(stock) == PROFILE["init_boot_sha256"], "Extracted stock image mismatch")
+    require(digest(stock) == source["init_boot_sha256"], "Extracted source image mismatch")
     result = {"stock_init_boot": str(stock), "magisk_apk": str(apk)}
-    if method == "usb-fastboot":
-        result.update(root_method=method, patch_source_profile=PROFILE["id"],
-                      patch_source_fingerprint=PROFILE["fingerprint"],
+    if binding is not None and source["id"] != active_profile(binding)["id"]:
+        result.update(root_method=method, patch_source_profile=source["id"],
+                      patch_source_fingerprint=source["fingerprint"],
                       original_device_backup=False)
     return result
 
@@ -425,7 +447,9 @@ def read_android_id(device, label):
 
 def prepare_root(device, stock, apk, method="dsu"):
     props = device.identify(unlocked=True)
+    require_original_firmware(props)
     source = patch_source_profile(props, method)
+    foreign_source = source["id"] != active_profile(props)["id"]
     if method == "usb-fastboot":
         require(device.text("patch-android-state", "gsi_tool", "status") in ("normal", "installed\ndisabled"),
                 "Prepare the USB image from the original Android, not an enabled or running DSU")
@@ -454,12 +478,13 @@ export PATCHVBMETAFLAG=false RECOVERYMODE=false LEGACYSAR=false
                "boot_id": boot, "remote": remote, "stock_image": original,
                "magisk_apk_sha256": PROFILE["magisk_apk_sha256"],
                "firmware_written": False, "startup_registration": False, "root_installed": False}
-    if method == "usb-fastboot":
+    if foreign_source:
         receipt.pop("stock_image")
         receipt.update(root_method=method, patch_source_profile=source["id"],
                        patch_source_fingerprint=source["fingerprint"], patch_source_image=original,
-                       original_device_backup=False,
-                       fastboot_partition=slot_profile(device.binding)["root_partition"])
+                       original_device_backup=False)
+    if method == "usb-fastboot":
+        receipt["fastboot_partition"] = slot_profile(device.binding)["root_partition"]
     save(device.s.path / "patch-request.json", receipt)
     device.shell("mkdir-patch", "mkdir", "-m", "700", remote)
     for path in sorted(tools.iterdir()):
@@ -474,7 +499,7 @@ export PATCHVBMETAFLAG=false RECOVERYMODE=false LEGACYSAR=false
     device.call("pull-patched-image", "pull", remote + "/new-boot.img", str(patched), timeout=30)
     patched_info = validate_image(patched)
     require(patched_info["sha256"] != original["sha256"], "Image was not changed by the patcher")
-    source_name = "patch-source-init_boot.img" if method == "usb-fastboot" else "stock-init_boot.img"
+    source_name = "patch-source-init_boot.img" if foreign_source else "stock-init_boot.img"
     shutil.copyfile(stock, device.s.path / source_name)
     device.shell("mkdir-verify", "mkdir", remote + "/verify")
     device.shell("unpack-patch-check", "sh", "-c",

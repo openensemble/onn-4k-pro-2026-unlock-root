@@ -31,6 +31,14 @@ def now():
 
 SCHEMA = "onn26-guide-v1"
 RISK_VERSION = 1
+ROW_DSU_NOTICE = (
+    "Canadian network DSU rooting was reported successful by kushmint on slot A in issue #5.\n"
+    "We have not independently tested the Canadian method on hardware; slot B has no separate report.\n"
+    "https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/5\n\n"
+    "The temporary system and patch source come from the pinned US OTA.\n"
+    "Before flashing, the guide saves and checks this onn's current init_boot image.\n"
+    "That snapshot is not verified factory stock and does not guarantee recovery."
+)
 RISK_TEXT = (
     "Unlocking will factory-reset your onn and erase ALL user apps, accounts, settings and other data.\n"
     "After the unlock reboot, you must complete that factory reset in Android Recovery on the TV.\n"
@@ -89,9 +97,9 @@ REPEATABLE = {"host", "baseline", "unlocked_check", "fetch", "build", "stock_wai
               "stock_return", "root_ready", "normal_check", "verify", "updates_check"}
 PREVIEW = """2026 onn unlock and root guide
 
-The supported US firmware (15640252) may run on active slot A or B. The guide keeps
-that slot throughout. Slot A has successful community unlock/root reports;
-slot B has measured hardware verification.
+The supported US firmware (15640252) and Canadian firmware (15016191) may run on
+active slot A or B. The guide keeps that slot throughout. US slot A and Canadian
+slot A have community reports; US slot B has measured hardware verification.
 
 1. Enable Developer mode, USB debugging and Wi-Fi/network debugging, then choose your onn.
 2. Read and accept the factory-reset, data-loss and bricking warning.
@@ -189,8 +197,7 @@ def slot_notice(binding):
     slot = binding.get("ro.boot.slot_suffix")
     require(slot in ("_a", "_b"), "The selected onn has no supported active slot")
     if binding.get("ro.build.fingerprint", "").startswith("onn/jarvis2_row/"):
-        return ("Active slot " + slot[-1].upper() + ": Canada/ROW firmware. "
-                "Guided DSU rooting is unavailable. See docs/ROW.md.\n\n")
+        return "Active slot " + slot[-1].upper() + ": Canada/ROW firmware.\n" + ROW_DSU_NOTICE + "\n\n"
     if slot == "_a":
         return "Active slot A: unlock and root have been confirmed by community reports for this firmware.\n\n"
     return "Active slot B: unlock and root have been verified on hardware for this firmware.\n\n"
@@ -465,7 +472,7 @@ class Guide:
                 self.act("flash_consent", stage=results["root_stage"]["stage"])
             elif phase == "flash_consent":
                 self.ui.accept(support_notice + "Ready to install permanent root on " + self.state["name"] + ".\n"
-                               "This will save and check the original image, install the prepared image once, and check it.\n"
+                               "This will save and check the current image, install the prepared image once, and check it.\n"
                                "Once verification passes, this will restart the onn automatically.\n"
                                "This write could brick the onn. A backup does not guarantee recovery.\n"
                                "Keep its power and network connection steady until the result is shown.")
@@ -473,7 +480,7 @@ class Guide:
                 self.advance("install")
             elif phase == "install":
                 require(self.state.get("install_accepted") is True, "The final installation was not accepted")
-                self.ui.say("\nSaving the original image, installing root once, and verifying the installed image...")
+                self.ui.say("\nSaving the current image, installing root once, and verifying the installed image...")
                 self.act("install_reboot", stage=results["root_stage"]["stage"], patch_result=results["patch"]["patch_result"],
                          accept_unproven_recovery=True)
             elif phase == "install_reboot":
@@ -500,7 +507,7 @@ class Guide:
             elif phase == "verify":
                 self.verify()
             elif phase == "cleanup":
-                self.ui.say("\nRoot is verified. Saving the stock backup and removing the temporary Android system...")
+                self.ui.say("\nRoot is verified. Preserving the pre-flash backup and removing the temporary Android system...")
                 self.act("updates", install_result=results["install"]["install_result"])
             elif phase == "updates":
                 self.ui.say("\nTurning off automatic system updates to protect this setup. App updates are separate...")

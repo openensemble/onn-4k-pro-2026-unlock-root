@@ -386,7 +386,9 @@ static-site HTML/JSON-LD and whitespace checks passed. Logs are in ignored
 `work/slot-a-and-unlock-recovery-update/`. No physical device was contacted and
 no website deployment was performed.
 
-## Canada/ROW profile integration — November 15, 2026
+## Initial Canada/ROW USB integration — November 15, 2026
+
+This records the initial PR integration before network DSU was enabled below.
 
 The Canada/ROW contribution from [PR #4](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/pull/4)
 is integrated for the exact `JCA` / `jarvis2_row` 15016191 firmware and bootloader
@@ -452,6 +454,97 @@ Validation:
 
 Evidence is retained under ignored `work/row-integration-20261115/`. No physical
 device was contacted. ROW hardware results remain the contributor's slot-A
-report, not a live validation by this integration. No ROW DSU image was built
-or installed; matching firmware inputs and hardware verification are still
-required. See [the Canada/ROW support boundary](ROW.md).
+report, not a live validation by this integration. At this checkpoint no ROW DSU
+image had been built or installed. The subsequent network integration is below.
+
+## Canadian network DSU integration — November 15, 2026
+
+[Issue #5](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/5)
+reports a complete Canadian slot-A network installation, including both temporary
+boots, permanent Magisk root, Enforcing SELinux and cleanup. This is a contributor
+report, not an independent hardware test. It does not establish a Canadian
+factory-stock `init_boot` hash or separate Canadian slot-B hardware verification.
+
+The exact ROW profile now selects the pinned US OTA explicitly for its temporary
+images and patch source. Native Canadian firmware remains the saved device
+identity. The combined `jarvis2_row` / US-15640252 fingerprint is accepted only
+while `ro.gsid.image_running=1`; the compiled root helper and flash script bind
+that exact guest fingerprint, the Canadian bootloader, physical serial and active
+slot. Original-Android operations require the native Canadian fingerprint again.
+
+US installs retain their pinned stock-partition hash. Canadian installs capture
+the actual pre-flash partition, validate its image structure, and require its hash
+to match both the initial root proof and the live partition immediately before
+writing. Receipts label this a pre-flash snapshot, with factory-stock provenance
+explicitly false. Cleanup preserves it under `/data/adb/onn26-backups/`, separate
+from Magisk's factory-stock backup directory. Existing exclusive attempt journals
+and the 15-minute build deadline remain. No `--reinstall` bypass was added.
+
+The Canadian menu now offers network DSU, the existing USB route and status.
+The shared network guide performs both temporary boots and skips unlock on
+already-unlocked devices. USB remains available only for Canadian units, with
+its separate progress and manual flash instructions. `guide --restart-dsu` now
+works for Canadian temporary setup with the existing confirmation and refusal
+of prior permanent-install attempts or detectable root.
+
+Validation:
+
+- **255 Python tests passed**, including **70 real flash-template fixture
+  scenarios** across US and Canadian slots A/B. They cover wrong device, slot,
+  fingerprint, bootloader, DSU state, block mapping, image size, backup/partition
+  hashes, partial writes, readback failures and consumed attempts.
+- Canadian tests exercise reconnect through native/guest/native firmware and an
+  IP change, original-only operation guards, on-target patch preparation, source
+  receipts, restart/restaging, both temporary boots, permanent installation,
+  reboot, root verification and backup cleanup. Device I/O is faked and real
+  subprocess/socket access is blocked in these workflow fixtures.
+- The actual Canadian menu completes the shared guide for locked and unlocked
+  fixtures on both slots, preserving separate USB progress. Diagnostic tests
+  accept the combined fingerprint only during DSU and keep factory-stock hashes
+  unknown. The existing US and USB regression tests also pass.
+- **11 native unlock-protocol scenarios passed**. All **45 packaged input hashes**,
+  Python syntax checks and Git whitespace checks passed.
+- Updated website copy passed local desktop and mobile browser checks: no
+  horizontal overflow or page errors, all images and section links valid, and
+  all five copy buttons and FAQ disclosures working. The website was not published.
+- A full offline Canadian slot-A build with a synthetic serial and test-only
+  public-key bytes succeeded in **43 seconds**, using NDK 28.2.13676358 and the
+  pinned US partition images. It preserved all **2,461 original inode records**,
+  verified every file and symlink, compiled the root helper and SELinux policy,
+  and passed filesystem and AVB verification. The resulting images are offline
+  test artifacts and were not uploaded to a device.
+
+Evidence stays under ignored `work/row-dsu-20261115/`. No physical device was
+contacted, unlocked, flashed or rebooted. See [Canada/ROW instructions](ROW.md)
+for the report attribution, backup limitations and network/USB choices.
+
+### Follow-up bug and regression review — November 15, 2026
+
+The initial 255-test rerun passed. Additional failure injection reproduced one
+verification gap: the DSU path could save a successful permanent-root result
+after the device changed boot or entered DSU during collection of the root
+proof. The USB path already checked for a changed boot afterward. Both methods
+now require the same device, native firmware, unlocked state, boot and DSU state
+again immediately before saving success.
+
+The expanded suite passes **259 Python tests**, including 24 combinations of
+changes during root verification across both regions and both slots. It also
+covers Canadian flash timeouts, failed commands, missing flash proof, bad
+independent readback and invalid snapshots. Failed or uncertain flashes keep
+their exclusive attempt record, cannot replay and never request a reboot.
+US cleanup still requires its pinned stock hash and uses Magisk's stock backup
+directory; Canadian snapshots remain separate. The existing **70 flash-template
+scenarios**, USB workflow and interruption/restart tests continue to pass.
+
+All **11 native protocol scenarios**, **45 package hashes**, Python syntax and
+whitespace checks passed. Fresh full offline builds for **Canadian slot B** and
+**US slot A** completed in about 40 seconds each. Their compiled bindings,
+filesystem metadata/content, SELinux policy and AVB data verified, and both
+stock rehearsal archives matched the previous build exactly. The Canadian
+slot-A offline build is recorded above. Disposable extraction and packing
+intermediates from the fresh builds were removed; images and verification
+receipts remain in ignored `work/row-dsu-review-20261115/`.
+
+No live device was contacted, flashed or rebooted during this review. Canadian
+hardware evidence remains the contributor's slot-A report. No commit, push or
+website publication was performed.

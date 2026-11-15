@@ -44,7 +44,7 @@ def state(device):
 
 
 def automatic_updates(device, args):
-    device.identify(unlocked=True)
+    o.require_original_firmware(device.identify(unlocked=True))
     o.require(state(device) in ("normal", "installed\ndisabled"), "Change the original Android setting, not a DSU guest")
     boot = device.boot_id()
     key = "ota_disable_automatic_update"
@@ -101,9 +101,11 @@ def reboot_verified(device, kind, proof):
     o.require(isinstance(proof, dict) and isinstance(proof.get("boot_id"), str)
               and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", proof["boot_id"]),
               "The completed step has no valid boot record; no restart")
-    device.identify(unlocked=kind == "install")
+    props = device.identify(unlocked=kind == "install")
     if kind == "install":
         o.require_dsu_support(device.binding)
+    else:
+        o.require_original_firmware(props)
     o.require(proof.get("binding") == device.binding, "Restart proof belongs to another onn, build, or slot")
     boot = device.boot_id()
     if kind == "unlock":
@@ -133,6 +135,7 @@ def reboot_verified(device, kind, proof):
         # A user may already have restarted while the guide was closed.
         device.identify(unlocked=True)
         if kind == "install":
+            o.require_original_firmware(device.identify(unlocked=True))
             o.require(state(device) == "installed\ndisabled"
                       and device.text("returned-android-before-reboot", "settings", "get", "secure", "android_id")
                       == proof["original_android_id"],
@@ -168,6 +171,12 @@ def build_matches(device, build):
                 "fingerprint": profile["fingerprint"], "bootloader": profile["bootloader"],
                 "slot": device.binding["ro.boot.slot_suffix"]}
     o.require(all(build.get(k) == v for k, v in expected.items()), "DSU build binding mismatch")
+    if profile.get("dsu_source_profile"):
+        source = o.dsu_source_profile(device.binding)
+        o.require(build.get("source_profile") == source["id"]
+                  and build.get("source_fingerprint") == source["fingerprint"]
+                  and build.get("dsu_fingerprint") == o.dsu_fingerprint(device.binding),
+                  "DSU image source or guest firmware binding mismatch")
     o.require(build.get("single_use_required") is True and build.get("root_helper_autostart") is False,
               "Unexpected DSU boot behavior")
     o.require(all(build.get(k) is True for k in ["all_original_inode_metadata_preserved",
@@ -176,18 +185,18 @@ def build_matches(device, build):
 
 def build_dsu(device, args):
     device.identify(unlocked=True)
-    o.require_dsu_support(device.binding)
+    source = o.dsu_source_profile(device.binding)
     o.verify_files()
     print("Preparing the temporary Android systems on this computer (15-minute build limit). "
           "Ctrl-C stops the build; the guide can resume it.", flush=True)
     cache = o.ROOT / "cache"
-    ota = o.download(o.PROFILE["ota_url"], cache / "jarvis2-15640252-full-ota.zip",
-                     o.PROFILE["ota_sha256"], o.PROFILE["ota_size"])
+    ota = o.download(source["ota_url"], cache / (source["id"] + "-full-ota.zip"),
+                     source["ota_sha256"], source["ota_size"])
     images = cache / "dsu-images"
     if not images.exists():
         device.s.run("extract-dsu-inputs", [sys.executable, o.ROOT / "tools/extract_dsu_ota.py",
-                     ota, images, "--partitions", *o.PROFILE["dsu_partitions"]], timeout=600)
-    for name, pin in o.PROFILE["dsu_partitions"].items():
+                     ota, images, "--partitions", *source["dsu_partitions"]], timeout=600)
+    for name, pin in source["dsu_partitions"].items():
         path = images / (name + ".img")
         o.require(path.is_file() and path.stat().st_size == pin["size"] and o.digest(path) == pin["sha256"],
                   "Incomplete or changed cached DSU input: " + name)
@@ -230,7 +239,7 @@ def stage_dsu(device, args):
                   "Stock single-use return was not demonstrated")
         o.require(rehearsal["build_sha256"] == o.digest(args.build), "Rehearsal used another DSU build")
         o.require(current == "installed\ndisabled", "Expected the disabled rehearsal DSU")
-    device.identify(unlocked=True)
+    o.require_original_firmware(device.identify(unlocked=True))
     boot = device.boot_id()
     android_id = o.read_android_id(device, "original-android-id")
     if args.kind == "root":
@@ -289,6 +298,7 @@ def dsu_status(device, args):
 def boot_dsu(device, args):
     stage = read(args.stage)
     bound(device, stage)
+    o.require_original_firmware(device.identify(unlocked=True))
     dsu_recovery.check_stage(device, stage)
     installed = read(args.stage.parent / "installed.json")
     o.require(installed.get("installed_disabled_verified") is True and
@@ -322,6 +332,7 @@ def stock_return(device, args):
     o.require(boot_request["stage_sha256"] == o.digest(args.stage), "Missing bound DSU boot request")
     boot = device.boot_id()
     o.require(boot != stage["boot_id"] and state(device) == "installed\ndisabled", "No demonstrated stock return")
+    o.require_original_firmware(device.identify(unlocked=True))
     android_id = device.text("returned-android-id", "settings", "get", "secure", "android_id")
     o.require(android_id == stage["android_id"], "This is not the original Android installation")
     result = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": android_id,
@@ -337,14 +348,16 @@ def patch_receipt(device, path, method="dsu"):
     receipt = read(path)
     bound(device, receipt, method)
     o.require(receipt.get("root_method", "dsu") == method, "Patch receipt belongs to another root method")
-    if method == "usb-fastboot":
-        source = o.patch_source_profile(device.binding, method)
+    source = o.patch_source_profile(device.binding, method)
+    if source["id"] != o.active_profile(device.binding)["id"]:
         o.require(receipt.get("patch_source_profile") == source["id"]
                   and receipt.get("patch_source_fingerprint") == source["fingerprint"]
                   and receipt.get("patch_source_image", {}).get("sha256") == source["init_boot_sha256"]
-                  and receipt.get("original_device_backup") is False
-                  and receipt.get("fastboot_partition") == o.slot_profile(device.binding)["root_partition"],
-                  "USB patch source or target partition differs from the approved receipt")
+                  and receipt.get("original_device_backup") is False,
+                  "Patch source differs from the approved regional receipt")
+    if method == "usb-fastboot":
+        o.require(receipt.get("fastboot_partition") == o.slot_profile(device.binding)["root_partition"],
+                  "USB target partition differs from the approved receipt")
     o.require(receipt.get("patched_on_target") is True and receipt.get("ramdisk_verified") is True,
               "Only a verified on-target patch is accepted")
     o.require(receipt["magisk_apk_sha256"] == o.PROFILE["magisk_apk_sha256"], "Magisk version changed")
@@ -373,17 +386,29 @@ def pull_block(device, helper, dest):
     return result
 
 
-def flash_script(binding, boot, remote, attempt, patch_hash):
+def flash_script(binding, boot, remote, attempt, patch_hash, pre_flash_sha256=None):
     profile = o.require_dsu_support(binding)
+    pinned_stock = profile.get("init_boot_sha256")
+    if pinned_stock:
+        o.require(pre_flash_sha256 in (None, pinned_stock), "Pinned stock hash cannot be overridden")
+        baseline = pinned_stock
+    else:
+        o.require(profile.get("pre_flash_backup_policy") == "capture-device"
+                  and isinstance(pre_flash_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", pre_flash_sha256),
+                  "A verified pre-flash partition snapshot is required")
+        baseline = pre_flash_sha256
+    backup_name = "stock-init_boot.img" if pinned_stock else "pre-flash-init_boot.img"
     slot = o.slot_profile(binding)
-    values = {"SERIAL": binding["ro.serialno"], "FINGERPRINT": profile["fingerprint"],
+    values = {"SERIAL": binding["ro.serialno"], "FINGERPRINT": o.dsu_fingerprint(binding),
               "BOOTLOADER": profile["bootloader"], "BOOT_ID": boot,
               "SLOT": binding["ro.boot.slot_suffix"], "PARTITION": o.root_partition(binding),
               "BLOCK_PATH": slot["root_block_path"],
               "SIZE_PATH": "/sys/class/block/" + Path(slot["root_block_path"]).name + "/size",
-              "PATCH_PATH": remote + "/patched-init_boot.img", "STOCK_PATH": remote + "/stock-init_boot.img",
-              "PATCH_SHA256": patch_hash, "STOCK_SHA256": profile["init_boot_sha256"], "ATTEMPT_PATH": attempt}
+              "PATCH_PATH": remote + "/patched-init_boot.img", "STOCK_PATH": remote + "/" + backup_name,
+              "PATCH_SHA256": patch_hash, "STOCK_SHA256": baseline, "ATTEMPT_PATH": attempt}
     template = (o.ROOT / "native/flash_init_boot.sh.in").read_text()
+    if not pinned_stock:
+        template = template.replace("partition no longer stock", "partition changed since backup")
     for name, value in values.items():
         template = template.replace("@@" + name + "@@", shlex.quote(value))
     o.require("@@" not in template, "Unexpanded flash script token")
@@ -412,18 +437,30 @@ def install_root(device, args):
     o.require(not attempt.exists(), "An installation attempt already exists; do not replay it")
     partition = o.root_partition(device.binding)
     proof = root(device, "root-and-stock-proof", "id; " + partition_hash_command(device.binding))
-    o.require("uid=0(root)" in proof["stdout"] and "u:r:onn26_root:s0" in proof["stdout"] and
-              o.PROFILE["init_boot_sha256"] + "  " + partition in proof["stdout"].splitlines(),
+    profile = o.require_dsu_support(device.binding)
+    pinned_stock = profile.get("init_boot_sha256")
+    o.require(pinned_stock or profile.get("pre_flash_backup_policy") == "capture-device",
+              "No approved pre-flash backup policy")
+    hashes = [line.split()[0] for line in proof["stdout"].splitlines()
+              if re.fullmatch(r"[0-9a-f]{64}  " + re.escape(partition), line)]
+    o.require("uid=0(root)" in proof["stdout"] and "u:r:onn26_root:s0" in proof["stdout"]
+              and len(hashes) == 1 and (not pinned_stock or hashes[0] == pinned_stock),
               "DSU root or stock partition proof failed")
-    backup = pull_block(device, "/system/bin/onn26-su", device.s.path / "stock-init_boot.img")
-    o.require(backup["sha256"] == o.PROFILE["init_boot_sha256"], "Device backup differs from pinned stock")
+    backup_name = "stock-init_boot.img" if pinned_stock else "pre-flash-init_boot.img"
+    backup = pull_block(device, "/system/bin/onn26-su", device.s.path / backup_name)
+    o.require(backup["sha256"] == hashes[0], "Partition changed between proof and backup")
+    if not pinned_stock:
+        o.require(o.validate_image(Path(backup["file"]))["sha256"] == backup["sha256"],
+                  "Invalid pre-flash init_boot snapshot")
+        backup.update(factory_stock_verified=False, role="pre-flash-partition-snapshot")
     token = uuid.uuid4().hex
     remote = "/data/local/tmp/onn26-root-install-" + token
     device_attempt = "/metadata/onn26-root-install-" + token
     local_script = device.s.path / "flash-once.sh"
-    local_script.write_text(flash_script(device.binding, boot, remote, device_attempt, patch["patched_image"]["sha256"]))
+    local_script.write_text(flash_script(device.binding, boot, remote, device_attempt,
+                                         patch["patched_image"]["sha256"], backup["sha256"]))
     device.shell("mkdir-root-staging", "mkdir", "-m", "755", remote)
-    for source, name in [(image, "patched-init_boot.img"), (Path(backup["file"]), "stock-init_boot.img"),
+    for source, name in [(image, "patched-init_boot.img"), (Path(backup["file"]), backup_name),
                          (local_script, "flash-once.sh")]:
         device.push_checked(source, remote + "/" + name)
         device.shell("readable-root-input", "chmod", "644", remote + "/" + name)
@@ -432,9 +469,10 @@ def install_root(device, args):
     record = {"at": o.now(), "binding": device.binding, "boot_id": boot, "partition": partition,
               "original_android_id": patch["android_id"], "patch_result": str(args.patch_result.resolve()),
               "patch_result_sha256": o.digest(args.patch_result), "image_sha256": patch["patched_image"]["sha256"],
-              "stock_backup": backup, "stage": str(args.stage.resolve()), "remote": remote,
+              "stage": str(args.stage.resolve()), "remote": remote,
               "device_attempt": device_attempt, "max_write_invocations": 1, "automatic_retry": False,
               "accept_unproven_recovery": True, "reboot_requested": False}
+    record["stock_backup" if pinned_stock else "pre_flash_backup"] = backup
     o.save(attempt, record, exclusive=True)
     result = root(device, "flash-once", "sh " + shlex.quote(remote + "/flash-once.sh") + " --write-once",
                   timeout=30, check=False)
@@ -456,6 +494,7 @@ def install_root(device, args):
 def verify_root(device, args):
     method = getattr(args, "method", "dsu")
     patch, _ = patch_receipt(device, args.patch_result, method)
+    o.require_original_firmware(device.identify(unlocked=True))
     boot = device.boot_id()
     o.require(boot != patch["boot_id"], "No reboot after image preparation")
     aid = device.text("original-installation", "settings", "get", "secure", "android_id")
@@ -483,10 +522,9 @@ def verify_root(device, args):
               "30.7:MAGISK:R" in lines and "30700" in lines and "Enforcing" in lines and
               patch["patched_image"]["sha256"] + "  " + partition in lines and
               "MAGISK_ENVIRONMENT_COMPLETE" in lines, "Permanent root/environment verification failed" + receipts)
-    if method == "usb-fastboot":
-        device.identify(unlocked=True)
-        o.require(device.boot_id() == boot and state(device) == current,
-                  "Device boot or DSU state changed during root verification")
+    o.require_original_firmware(device.identify(unlocked=True))
+    o.require(device.boot_id() == boot and state(device) == current,
+              "Device boot or DSU state changed during root verification")
     report = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": aid,
               "root_verified": True, "magisk_version": "30.7", "selinux_enforcing": True,
               "partition": partition, "partition_sha256": patch["patched_image"]["sha256"], "environment_complete": True,
@@ -507,22 +545,37 @@ def cleanup_root(device, args):
     verified = verify_root(device, args)
     stage = read(Path(installed["stage"]))
     bound(device, stage)
-    stock = Path(installed["stock_backup"]["file"])
-    o.require(o.digest(stock) == o.PROFILE["init_boot_sha256"], "Stock backup changed")
-    compressed = device.s.path / "stock-init_boot.img.gz"
+    profile = o.require_dsu_support(device.binding)
+    pinned_stock = profile.get("init_boot_sha256")
+    backup = installed["stock_backup" if pinned_stock else "pre_flash_backup"]
+    expected = pinned_stock or backup.get("sha256")
+    o.require(isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{64}", expected), "Invalid backup digest")
+    if not pinned_stock:
+        o.require(profile.get("pre_flash_backup_policy") == "capture-device"
+                  and backup.get("binding") == device.binding
+                  and backup.get("partition") == o.root_partition(device.binding)
+                  and backup.get("bytes") == profile["init_boot_size"]
+                  and backup.get("factory_stock_verified") is False
+                  and backup.get("role") == "pre-flash-partition-snapshot",
+                  "Pre-flash snapshot provenance is missing or changed")
+    stock = Path(backup["file"])
+    o.require(o.digest(stock) == expected, "Backup changed")
+    compressed = device.s.path / ("stock-init_boot.img.gz" if pinned_stock else "pre-flash-init_boot.img.gz")
     with stock.open("rb") as source, compressed.open("xb") as output:
         with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as stream:
             shutil.copyfileobj(source, stream)
     remote = "/data/local/tmp/onn26-backup-" + uuid.uuid4().hex + ".gz"
     device.push_checked(compressed, remote)
-    directory = "/data/magisk_backup_" + o.PROFILE["root_stock_sha1"]
-    command = ("set -e; test ! -e " + directory + "/boot.img.gz; mkdir -p " + directory +
-               "; chmod 700 " + directory + "; cp " + shlex.quote(remote) + " " + directory +
-               "/boot.img.gz; chown 0:0 " + directory + " " + directory + "/boot.img.gz; chmod 600 " +
-               directory + "/boot.img.gz; sync; /data/adb/magisk/busybox gzip -dc " + directory +
-               "/boot.img.gz | sha256sum")
-    result = root(device, "save-magisk-stock-backup", command, helper="/debug_ramdisk/su")
-    o.require(result["stdout"].split()[0] == o.PROFILE["init_boot_sha256"], "On-device stock backup mismatch")
+    directory = ("/data/magisk_backup_" + profile["root_stock_sha1"] if pinned_stock
+                 else "/data/adb/onn26-backups/" + expected)
+    backup_path = directory + ("/boot.img.gz" if pinned_stock else "/pre-flash-init_boot.img.gz")
+    command = ("set -e; test ! -e " + backup_path + "; mkdir -p " + directory +
+               "; chmod 700 " + directory + "; cp " + shlex.quote(remote) + " " + backup_path +
+               "; chown 0:0 " + directory + " " + backup_path + "; chmod 600 " +
+               backup_path + "; sync; /data/adb/magisk/busybox gzip -dc " + backup_path + " | sha256sum")
+    label = "save-magisk-stock-backup" if pinned_stock else "save-pre-flash-snapshot"
+    result = root(device, label, command, helper="/debug_ramdisk/su")
+    o.require(result["stdout"].split()[0] == expected, "On-device backup mismatch")
     device.shell("remove-backup-transfer", "rm", remote)
     if state(device) == "installed\ndisabled":
         # This is the package's own guest: original Android identity and its
@@ -545,8 +598,12 @@ def cleanup_root(device, args):
             o.require(device.text("known-download-digest", "sha256sum", path, timeout=30).split()[0] == expected,
                       "Staged file changed; leaving it in place")
             device.shell("remove-own-download", "rm", path)
-    return {**verified, "dsu_state": "normal", "cleanup_completed": True,
-            "stock_backup_on_device": directory + "/boot.img.gz"}
+    result = {**verified, "dsu_state": "normal", "cleanup_completed": True}
+    if pinned_stock:
+        result["stock_backup_on_device"] = backup_path
+    else:
+        result.update(pre_flash_backup_on_device=backup_path, factory_stock_verified=False)
+    return result
 
 
 def add_parsers(sub):

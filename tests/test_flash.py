@@ -20,12 +20,15 @@ def digest(path):
 
 
 class FlashTests(unittest.TestCase):
-    def exercise(self, case, slot):
+    def exercise(self, case, slot, profile=None):
+        profile = profile or o.PROFILE
+        row = profile is not o.PROFILE
         with tempfile.TemporaryDirectory(prefix="onn26-fixture-") as directory:
             root = Path(directory)
             commands = root / "commands"
             commands.mkdir()
-            target, stock, image = (root / name for name in ["partition.fixture", "stock-init_boot.img", "patched-init_boot.img"])
+            backup_name = "pre-flash-init_boot.img" if row else "stock-init_boot.img"
+            target, stock, image = (root / name for name in ["partition.fixture", backup_name, "patched-init_boot.img"])
             inactive = root / "inactive.fixture"
             by_name = root / ("init_boot" + slot)
             by_name.symlink_to(target)
@@ -36,8 +39,9 @@ class FlashTests(unittest.TestCase):
             stock_hash, image_hash = digest(stock), digest(image)
             attempt = root / "attempt"
             values = {
-                "ro.serialno": "JUSA123456", "ro.build.fingerprint": o.PROFILE["fingerprint"],
-                "ro.bootloader": o.PROFILE["bootloader"], "ro.boot.slot_suffix": slot,
+                "ro.serialno": profile["serial_prefixes"][0] + "123456",
+                "ro.build.fingerprint": profile.get("dsu_fingerprint", profile["fingerprint"]),
+                "ro.bootloader": profile["bootloader"], "ro.boot.slot_suffix": slot,
                 "ro.boot.flash.locked": "0", "ro.gsid.image_running": "1",
                 "/proc/sys/kernel/random/boot_id": BOOT,
                 "/metadata/gsi/dsu/install_status": "disabled", "/metadata/gsi/dsu/one_shot_boot": "1",
@@ -50,6 +54,12 @@ class FlashTests(unittest.TestCase):
                 values["ro.boot.slot_suffix"] = "_b" if slot == "_a" else "_a"
             elif case == "wrong-firmware":
                 values["ro.build.fingerprint"] = "another-build"
+            elif case == "native-firmware":
+                values["ro.build.fingerprint"] = profile["fingerprint"]
+            elif case == "wrong-bootloader":
+                values["ro.bootloader"] = "another-bootloader"
+            elif case == "not-dsu":
+                values["ro.gsid.image_running"] = "0"
             elif case == "wrong-mapping":
                 by_name.unlink()
                 by_name.symlink_to(inactive)
@@ -100,11 +110,12 @@ if os.environ['ONN26_FIXTURE_CASE'] in ('partial-write', 'readback-failure'):
 os.execv('/bin/dd', ['dd', *sys.argv[1:]])
 ''')
             path.chmod(0o700)
-            binding = {"ro.serialno": "JUSA123456", "ro.boot.slot_suffix": slot,
-                       "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
-                       "ro.product.device": o.PROFILE["device"]}
+            binding = {"ro.serialno": profile["serial_prefixes"][0] + "123456", "ro.boot.slot_suffix": slot,
+                       "ro.build.fingerprint": profile["fingerprint"], "ro.bootloader": profile["bootloader"],
+                       "ro.product.device": profile["device"]}
             with patch.dict(o.PROFILE, {"init_boot_sha256": stock_hash}):
-                script = flow.flash_script(binding, BOOT, str(root), str(attempt), image_hash)
+                script = flow.flash_script(binding, BOOT, str(root), str(attempt), image_hash,
+                                           stock_hash if row else None)
             # Test-only conversion. The shipped template has no fixture mode and
             # accepts only its pinned block node, mapping and partition length.
             script = script.replace('[ -b "$partition" ]', '[ -f "$partition" ]')
@@ -156,6 +167,16 @@ os.execv('/bin/dd', ['dd', *sys.argv[1:]])
                          "missing-action"]:
                 with self.subTest(case=case, slot=slot):
                     self.exercise(case, slot)
+
+    def test_canadian_guest_identity_and_snapshot_guards_on_both_slots(self):
+        profile = o.PROFILE["variants"]["jarvis2-row-15016191"]
+        for slot in ("_a", "_b"):
+            for case in ["success", "check-only", "wrong-unit", "wrong-slot", "wrong-firmware",
+                         "native-firmware", "wrong-bootloader", "not-dsu", "wrong-mapping", "wrong-size",
+                         "size-unavailable", "changed-boot", "armed-dsu", "wrong-image", "changed-partition",
+                         "consumed", "partial-write", "readback-failure", "missing-action"]:
+                with self.subTest(case=case, slot=slot):
+                    self.exercise(case, slot, profile)
 
 
 if __name__ == "__main__":

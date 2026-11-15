@@ -81,9 +81,12 @@ write, unlock or reboot is issued by removal. An existing root-install attempt,
 post-install guide phase, or detectable permanent root blocks this restart path.
 Use the original verification/cleanup flow for an already-rooted device.
 
-The installer stores an exact stock image in its local `work/` session. After
-permanent-root verification, `cleanup-root` also installs the same stock image
-as Magisk’s compressed backup. These backups support a separately reviewed
+For US units, the installer stores a verified stock image in its local `work/`
+session. After permanent-root verification, `cleanup-root` also installs the same
+stock image as Magisk’s compressed backup. Canadian network DSU installations
+save their actual pre-flash partition instead, without claiming factory-stock
+provenance. Cleanup preserves that snapshot under `/data/adb/onn26-backups/`,
+separate from Magisk's stock restore directory. These backups support a separately reviewed
 restore while a suitable transport is working. An actual restore after a failed
 boot was not tested; no automatic rescue promise is made.
 

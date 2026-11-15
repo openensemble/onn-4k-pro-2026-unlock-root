@@ -233,8 +233,9 @@ def inspect(device, current, targets):
             if result["returncode"] == 0 and not result["timed_out"]:
                 properties = o.parse_props(result["stdout"])
                 try:
-                    o.validate_identity(properties)
-                    row["properties"] = properties
+                    binding = o.validate_identity(properties)
+                    row["observed_fingerprint"] = properties["ro.build.fingerprint"]
+                    row["properties"] = {**properties, **binding}
                 except o.Stop:
                     row["reason"] = "Unsupported firmware or hardware profile"
             else:

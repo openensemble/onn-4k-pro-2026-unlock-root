@@ -1,4 +1,4 @@
-"""Regional identities, unlock binding and refusal of unverified DSU inputs. No live I/O."""
+"""Regional identities, unlock binding, explicit DSU sources and diagnostics. No live I/O."""
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
@@ -96,7 +96,8 @@ class RegionalSupport(unittest.TestCase):
             o.slot_profile({"ro.boot.slot_suffix": "_a"})
 
     def test_row_profile_never_inherits_us_image_pins_or_root_verification(self):
-        self.assertFalse(ROW["dsu_root_supported"])
+        self.assertTrue(ROW["dsu_root_supported"])
+        self.assertEqual(ROW["dsu_source_profile"], o.PROFILE["id"])
         for key in ("ota_url", "ota_sha256", "init_boot_sha256", "root_stock_sha1", "dsu_partitions"):
             self.assertNotIn(key, ROW)
         for slot in ROW["slots"].values():
@@ -112,7 +113,7 @@ class RegionalSupport(unittest.TestCase):
                 saved = connection.load(result["connection_file"])
                 self.assertEqual(saved["binding"], device.binding)
                 self.assertEqual(result["firmware_profile"], ROW["id"])
-                self.assertFalse(result["dsu_root_supported"])
+                self.assertTrue(result["dsu_root_supported"])
                 self.assertEqual(result["slot_profile"]["root_partition"], "init_boot" + slot)
                 self.assertEqual(device.calls, [])
 
@@ -162,18 +163,18 @@ class RegionalSupport(unittest.TestCase):
                 o.unlock(device, True)
         self.assertEqual(sum(c[0] == "unlock-once" for c in device.calls), 1)
 
-    def test_root_entry_commands_refuse_row_before_reading_receipts_or_mutating(self):
+    def test_root_entry_commands_refuse_disabled_profile_before_receipts_or_mutation(self):
         commands = flow.COMMANDS - {"disable-updates", "updates-status", "enable-updates"}
         for slot in ("_a", "_b"):
             device = Device(self.work / slot, slot)
             for command in sorted(commands):
                 with self.subTest(slot=slot, command=command), patch.object(o, "verify_files"), \
-                     self.assertRaisesRegex(o.Stop, "matching ROW firmware"):
+                     patch.dict(ROW, dsu_root_supported=False), self.assertRaisesRegex(o.Stop, "DSU rooting is not enabled"):
                     flow.run(device, SimpleNamespace(command=command))
             self.assertEqual(device.calls, [])
             self.assertEqual(list(device.s.work.glob("devices/*/*attempt*")), [])
 
-    def test_direct_preparation_and_flash_paths_refuse_row_without_inputs(self):
+    def test_direct_paths_refuse_disabled_profile_without_inputs(self):
         device = Device(self.work)
         actions = [lambda: o.prepare_root(device, self.work / "missing.img", self.work / "missing.apk"),
                    lambda: o.fetch_inputs(device.s, device.binding),
@@ -184,7 +185,8 @@ class RegionalSupport(unittest.TestCase):
                    lambda: flow.flash_script(device.binding, BOOT, "/unused", "/unused", "a" * 64),
                    lambda: flow.reboot_verified(device, "install", {"boot_id": BOOT, "binding": device.binding})]
         for index, action in enumerate(actions):
-            with self.subTest(action=index), self.assertRaisesRegex(o.Stop, "matching ROW firmware"):
+            with self.subTest(action=index), patch.dict(ROW, dsu_root_supported=False), \
+                 self.assertRaisesRegex(o.Stop, "DSU rooting is not enabled"):
                 action()
         self.assertEqual(device.calls, [])
 
@@ -194,18 +196,20 @@ class RegionalSupport(unittest.TestCase):
         for selector in (["--connection", saved], ["--target", OLD]):
             with self.subTest(selector=selector), patch.object(o, "ROOT", self.work), \
                  patch.object(o, "Device", return_value=device), redirect_stdout(StringIO()), \
-                 redirect_stderr(StringIO()) as output:
-                self.assertEqual(o.main(["--work", str(self.work), *selector, "fetch-inputs"]), 2)
-                self.assertIn("matching ROW firmware", output.getvalue())
+                 redirect_stderr(StringIO()), patch.object(o, "fetch_inputs", return_value={}) as fetch:
+                self.assertEqual(o.main(["--work", str(self.work), *selector, "fetch-inputs"]), 0)
+                selected = fetch.call_args.args[1]
+                self.assertEqual({key: selected[key] for key in o.IDENTITY}, device.binding)
+                self.assertEqual(fetch.call_args.args[2], "dsu")
         self.assertFalse((self.work / "cache").exists())
 
-    def test_builder_rejects_row_and_wrong_serial_before_probing_tools(self):
+    def test_builder_rejects_disabled_profile_and_wrong_serial_before_probing_tools(self):
         for profile, serial in ((ROW["id"], "JCAROWTEST"), (o.PROFILE["id"], "JCAROWTEST")):
             args = SimpleNamespace(firmware_profile=profile, serial=serial, slot="_a")
-            with self.subTest(profile=profile), self.assertRaises(o.Stop):
+            with self.subTest(profile=profile), patch.dict(ROW, dsu_root_supported=False), self.assertRaises(o.Stop):
                 build_dsu.build(args)
 
-    def test_dsu_restart_refuses_row_before_backend_or_saved_state_changes(self):
+    def test_dsu_restart_preserves_invalid_existing_row_checkpoint(self):
         device = Device(self.work)
         saved = Path(connection.remember(device))
         checkpoint = saved.parent / "guide.json"
@@ -221,8 +225,7 @@ class RegionalSupport(unittest.TestCase):
                  patch.object(guide, "Backend", side_effect=AssertionError("ROW guide must stop before backend")):
                 self.assertEqual(guide.start(args, ui), 2)
                 self.assertEqual(checkpoint.read_bytes(), before)
-        self.assertIn("matching ROW firmware", "\n".join(messages))
-        self.assertIn("USB fastboot image preparation", "\n".join(messages))
+        self.assertIn("Saved guide progress is not recognized", "\n".join(messages))
 
     def test_guide_fetch_passes_selected_firmware_to_download_guard(self):
         device = Device(self.work)
@@ -230,8 +233,9 @@ class RegionalSupport(unittest.TestCase):
         with patch.object(o, "verify_files"):
             context = backend.prepare("fetch")
         self.assertIsNone(context.device)  # Downloads are deliberately host-only.
-        with self.assertRaisesRegex(o.Stop, "matching ROW firmware"):
+        with patch.object(o, "fetch_inputs", return_value={}) as fetch:
             backend.invoke("fetch", context, {})
+            fetch.assert_called_once_with(context.s, device.binding)
 
     def test_us_guide_download_uses_saved_identity_without_device_access(self):
         device = Device(self.work)
@@ -258,11 +262,12 @@ class RegionalSupport(unittest.TestCase):
                 self.assertEqual(comparison["compared_profile"], ROW["id"])
                 self.assertTrue(comparison["firmware_matches"])
                 self.assertTrue(comparison["bootloader_matches"])
-                self.assertFalse(comparison["dsu_root_supported"])
+                self.assertTrue(comparison["dsu_root_supported"])
                 self.assertFalse(comparison["root_method_hardware_verified"])
-                self.assertFalse(comparison["active_slot_matches_installer"])
+                self.assertTrue(comparison["active_slot_matches_installer"])
                 self.assertEqual(comparison["unlock_hardware_verified"], slot == "_a")
                 self.assertEqual(comparison["fastboot_root_hardware_reported"], slot == "_a")
+                self.assertEqual(comparison["dsu_root_hardware_reported"], slot == "_a")
                 for partition in ("init_boot_a", "init_boot_b"):
                     result = report["partitions"][partition]["sha256"]
                     self.assertFalse(result["reference_stock_image_available"])
@@ -270,10 +275,28 @@ class RegionalSupport(unittest.TestCase):
                 self.assertNotIn("JCA", json.dumps(report))
                 self.assertIn(props()["ro.serialno"], json.dumps(collector.records))
 
-    def test_row_notices_never_claim_dsu_verification(self):
+    def test_diagnostic_accepts_combined_fingerprint_only_in_running_dsu(self):
+        for running in ("1", "0"):
+            fake = FakeADB(slot="_a", readable=True)
+            fake.values.update(props(), **{"ro.build.fingerprint": ROW["dsu_fingerprint"],
+                                           "ro.gsid.image_running": running})
+            collector = slot_report.Collector("fake-adb", TARGET, o.PROFILE)
+            with patch.object(slot_report.subprocess, "run", side_effect=fake):
+                report = collector.collect()
+            self.assertEqual(report["collection_status"], "complete")
+            comparison = report["profile_comparison"]
+            self.assertEqual(comparison["firmware_matches"], running == "1")
+            self.assertEqual(comparison["dsu_root_supported"], running == "1")
+            self.assertEqual(report["properties"]["ro.build.fingerprint"], ROW["dsu_fingerprint"])
+            if running == "1":
+                self.assertEqual(comparison["compared_profile"], ROW["id"])
+                self.assertIsNone(report["partitions"]["init_boot_a"]["sha256"]["matches_reference_stock_image"])
+
+    def test_row_notices_attribute_dsu_report_and_testing_limits(self):
         for slot in ("_a", "_b"):
             notice = guide_core.slot_notice(props(slot))
-            self.assertIn("Guided DSU rooting is unavailable", notice)
+            self.assertIn("reported successful by kushmint on slot A", notice)
+            self.assertIn("not independently tested", notice)
             self.assertNotIn("root have been", notice)
 
 

@@ -134,6 +134,7 @@ class Backend:
         if phase == "host":
             return host_setup(self.args, self.ui)
         if phase in ("baseline", "unlocked_check"):
+            o.require_original_firmware(device.identify())
             result = o.status(device)
             if flow.state(device) != "normal":
                 raise TemporarySystemPresent("The onn already has a temporary Android installation. " + dsu_recovery.HINT)
@@ -179,6 +180,7 @@ class Backend:
             return flow.install_root(device, args)
         if phase == "normal_check":
             patch, _ = flow.patch_receipt(device, args.patch_result)
+            o.require_original_firmware(device.identify(unlocked=True))
             boot = device.boot_id()
             o.require(boot != values["install"]["boot_id"] and flow.state(device) == "installed\ndisabled"
                       and device.text("original-android", "settings", "get", "secure", "android_id") == patch["android_id"],
@@ -256,11 +258,12 @@ def start(args, ui=None):
             record = connection.load(selected)
             directory = args.work / "devices" / hashlib.sha256(record["binding"]["ro.serialno"].encode()).hexdigest()
             if o.active_profile(record["binding"]).get("usb_fastboot_patch_source_profile"):
-                if args.restart_dsu:
-                    o.require_dsu_support(record["binding"])
-                import row_usb_guide
-                path = directory / "usb-guide.json"
-                return row_usb_guide.start(args, selected, record, path, ui)
+                if not args.restart_dsu:
+                    import row_usb_guide
+                    path = directory / "usb-guide.json"
+                    route = row_usb_guide.start(args, selected, record, path, ui)
+                    if route != "dsu":
+                        return route
             o.require_dsu_support(record["binding"])
             path = directory / "guide.json"
             restarting = args.restart_dsu or bool(dsu_recovery.pending(directory))
