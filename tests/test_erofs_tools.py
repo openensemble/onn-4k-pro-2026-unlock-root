@@ -71,7 +71,7 @@ class ErofsToolTests(unittest.TestCase):
                 guide.host_setup(args, None)
 
     def test_direct_or_resumed_builder_checks_tools_before_reading_inputs(self):
-        args = SimpleNamespace(mkfs_erofs="mkfs.erofs", fsck_erofs="fsck.erofs")
+        args = SimpleNamespace(mkfs_erofs="mkfs.erofs", fsck_erofs="fsck.erofs", serial="JUSATOOLTEST", slot="_b")
         with patch.object(build_dsu, "check_erofs_tools", side_effect=o.Stop("incompatible EROFS tools")), \
              redirect_stdout(StringIO()):
             with self.assertRaisesRegex(o.Stop, "incompatible EROFS tools"):

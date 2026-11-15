@@ -25,7 +25,7 @@ def load(path):
               "Invalid connection file; use the path printed by the initial status command")
     binding = validate_binding(record.get("binding"))
     # Check the saved firmware profile without substituting a newly discovered serial.
-    o.validate_identity({**binding, "ro.product.cpu.abilist": o.PROFILE["abi"]})
+    o.validate_identity({**binding, "ro.product.cpu.abilist": o.active_profile(binding)["abi"]})
     o.require(isinstance(record.get("target"), str) and
               re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:%\[\]-]{0,199}", record["target"]),
               "Invalid saved ADB target")

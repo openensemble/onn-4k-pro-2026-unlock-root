@@ -17,7 +17,7 @@ import urllib.request
 import uuid
 import zipfile
 from datetime import datetime, timezone
-from connection_identity import FIELDS
+from connection_identity import FIELDS, SERIAL_PATTERN
 from guide_core import Stop, require, now
 
 ROOT = Path(__file__).resolve().parent
@@ -93,12 +93,50 @@ def parse_lock_state(text):
     return rows[0]["a"]
 
 
+def active_profile(binding):
+    """Select an exact firmware identity; regional profiles never inherit images."""
+    for profile in (PROFILE, *PROFILE.get("variants", {}).values()):
+        if binding.get("ro.build.fingerprint") == profile["fingerprint"]:
+            return profile
+    raise Stop("Unsupported or changed device: ro.build.fingerprint")
+
+
+def require_dsu_support(binding):
+    profile = active_profile(binding)
+    require(profile.get("dsu_root_supported") is True,
+            "Canada/ROW firmware supports manual unlock and USB fastboot image preparation. "
+            "Guided DSU rooting is unavailable: matching ROW firmware images and stock "
+            "init_boot hashes have not been verified. See docs/ROW.md. "
+            "This command will not unlock, reset or install root on this firmware.")
+    return profile
+
+
+def patch_source_profile(binding, method="dsu"):
+    """Explicit USB compatibility does not supply a regional stock backup or DSU inputs."""
+    require(method in ("dsu", "usb-fastboot"), "Unknown root method")
+    if method == "dsu":
+        return require_dsu_support(binding)
+    profile = active_profile(binding)
+    require(profile.get("usb_fastboot_patch_source_profile") == PROFILE["id"]
+            and profile["init_boot_size"] == PROFILE["init_boot_size"],
+            "No USB fastboot patch source is approved for this firmware")
+    return PROFILE
+
+
+def add_root_method_argument(parser):
+    # The manual USB flag is documented only in the Canada/ROW instructions.
+    # Keep the US guide and ordinary command help free of a USB root choice.
+    parser.add_argument("--method", choices=("dsu", "usb-fastboot"), default="dsu",
+                        help=argparse.SUPPRESS)
+
+
 def slot_profile(binding):
     """Select only the explicitly bound slot; never default or change slots."""
     slot = binding.get("ro.boot.slot_suffix")
-    require(slot in ("_a", "_b") and slot in PROFILE["slots"],
+    profile = active_profile(binding)
+    require(slot in ("_a", "_b") and slot in profile["slots"],
             "Unsupported or missing active slot: ro.boot.slot_suffix")
-    return PROFILE["slots"][slot]
+    return profile["slots"][slot]
 
 
 def root_partition(binding):
@@ -106,15 +144,19 @@ def root_partition(binding):
 
 
 def validate_identity(props, unlocked=False):
-    expected = {"ro.product.device": PROFILE["device"],
-                "ro.build.fingerprint": PROFILE["fingerprint"],
-                "ro.bootloader": PROFILE["bootloader"]}
+    profile = active_profile(props)
+    expected = {"ro.product.device": profile["device"],
+                "ro.build.fingerprint": profile["fingerprint"],
+                "ro.bootloader": profile["bootloader"]}
     for key, value in expected.items():
         require(props.get(key) == value, "Unsupported or changed device: " + key)
     slot_profile(props)
-    require(re.fullmatch(r"JUSA[A-Za-z0-9]+", props.get("ro.serialno", "")),
+    serial = props.get("ro.serialno", "")
+    require(re.fullmatch(SERIAL_PATTERN, serial),
             "Missing or unexpected jarvis2 hardware serial")
-    require(PROFILE["abi"] in props.get("ro.product.cpu.abilist", "").split(","),
+    require(any(serial.startswith(prefix) for prefix in profile["serial_prefixes"]),
+            "Hardware serial does not match the pinned firmware region")
+    require(profile["abi"] in props.get("ro.product.cpu.abilist", "").split(","),
             "Unsupported userspace ABI")
     if unlocked:
         require(all(props.get(k) == v for k, v in UNLOCKED.items()),
@@ -222,6 +264,8 @@ def status(device, name=None):
     props = device.identify()
     state, boot = lock_state(device)
     result = {"at": now(), "binding": device.binding, "boot_id": boot,
+              "firmware_profile": active_profile(device.binding)["id"],
+              "dsu_root_supported": active_profile(device.binding)["dsu_root_supported"],
               "slot_profile": dict(slot_profile(device.binding)),
               "secure_lock_state": state, "boot_completed": props.get("sys.boot_completed"),
               "boot_properties": {k: props.get(k) for k in UNLOCKED},
@@ -236,6 +280,7 @@ def unlock(device, accepted):
             "erasing all user apps, accounts, settings and other local data. "
             "Read the instructions and supply --accept-data-loss.")
     props = device.identify()
+    profile = active_profile(props)
     state, boot = lock_state(device)
     if state == 0:
         result = {"at": now(), "already_unlocked": True, "write_invocations": 0,
@@ -257,7 +302,7 @@ def unlock(device, accepted):
                    "session": str(device.s.path), "remote": remote,
                    "max_write_invocations": 1, "automatic_retry": False}, exclusive=True)
     args = [remote + "/unlock_once", "--unlock-once", props["ro.serialno"],
-            PROFILE["fingerprint"], PROFILE["bootloader"], device.binding["ro.boot.slot_suffix"], boot,
+            profile["fingerprint"], profile["bootloader"], device.binding["ro.boot.slot_suffix"], boot,
             remote + "/attempt-consumed"]
     result = device.shell("unlock-once", *args, timeout=15, check=False)
     save(device.s.path / "unlock-execution.json", result)
@@ -304,7 +349,12 @@ def download(url, destination, expected, expected_size=None):
     return destination
 
 
-def fetch_inputs(session):
+def fetch_inputs(session, binding=None, method="dsu"):
+    # Without a selected device this explicitly downloads the default US inputs.
+    require(binding is not None or method == "dsu",
+            "USB fastboot preparation requires --connection or --target for the intended onn")
+    if binding is not None:
+        patch_source_profile(binding, method)
     verify_files()
     cache = ROOT / "cache"
     apk = download(PROFILE["magisk_url"], cache / "Magisk-v30.7.apk", PROFILE["magisk_apk_sha256"])
@@ -317,7 +367,12 @@ def fetch_inputs(session):
         session.run("extract-init-boot", [sys.executable, ROOT / "tools/extract_full_ota.py",
                     ota, stock.parent, "--partitions", "init_boot"], timeout=180)
     require(digest(stock) == PROFILE["init_boot_sha256"], "Extracted stock image mismatch")
-    return {"stock_init_boot": str(stock), "magisk_apk": str(apk)}
+    result = {"stock_init_boot": str(stock), "magisk_apk": str(apk)}
+    if method == "usb-fastboot":
+        result.update(root_method=method, patch_source_profile=PROFILE["id"],
+                      patch_source_fingerprint=PROFILE["fingerprint"],
+                      original_device_backup=False)
+    return result
 
 
 def validate_image(path, stock=False):
@@ -368,8 +423,12 @@ def read_android_id(device, label):
     return value
 
 
-def prepare_root(device, stock, apk):
+def prepare_root(device, stock, apk, method="dsu"):
     props = device.identify(unlocked=True)
+    source = patch_source_profile(props, method)
+    if method == "usb-fastboot":
+        require(device.text("patch-android-state", "gsi_tool", "status") in ("normal", "installed\ndisabled"),
+                "Prepare the USB image from the original Android, not an enabled or running DSU")
     state, boot = lock_state(device)
     require(state == 0, "Secure AVB unlock is not proved")
     android_id = read_android_id(device, "android-installation-id")
@@ -395,6 +454,12 @@ export PATCHVBMETAFLAG=false RECOVERYMODE=false LEGACYSAR=false
                "boot_id": boot, "remote": remote, "stock_image": original,
                "magisk_apk_sha256": PROFILE["magisk_apk_sha256"],
                "firmware_written": False, "startup_registration": False, "root_installed": False}
+    if method == "usb-fastboot":
+        receipt.pop("stock_image")
+        receipt.update(root_method=method, patch_source_profile=source["id"],
+                       patch_source_fingerprint=source["fingerprint"], patch_source_image=original,
+                       original_device_backup=False,
+                       fastboot_partition=slot_profile(device.binding)["root_partition"])
     save(device.s.path / "patch-request.json", receipt)
     device.shell("mkdir-patch", "mkdir", "-m", "700", remote)
     for path in sorted(tools.iterdir()):
@@ -409,7 +474,8 @@ export PATCHVBMETAFLAG=false RECOVERYMODE=false LEGACYSAR=false
     device.call("pull-patched-image", "pull", remote + "/new-boot.img", str(patched), timeout=30)
     patched_info = validate_image(patched)
     require(patched_info["sha256"] != original["sha256"], "Image was not changed by the patcher")
-    shutil.copyfile(stock, device.s.path / "stock-init_boot.img")
+    source_name = "patch-source-init_boot.img" if method == "usb-fastboot" else "stock-init_boot.img"
+    shutil.copyfile(stock, device.s.path / source_name)
     device.shell("mkdir-verify", "mkdir", remote + "/verify")
     device.shell("unpack-patch-check", "sh", "-c",
                  f"cd {remote}/verify && ../magiskboot unpack ../new-boot.img", timeout=20)
@@ -434,6 +500,11 @@ export PATCHVBMETAFLAG=false RECOVERYMODE=false LEGACYSAR=false
                    magisk_configuration=config, ramdisk_verified=True,
                    patch_result=str(device.s.path / "patch-result.json"),
                    next="Build DSU inputs and follow the stock-return rehearsal before root installation.")
+    if method == "usb-fastboot":
+        receipt["next"] = ("Follow docs/ROW.md: confirm this physical serial and active slot in USB fastboot, "
+                           "flash this device's patched-init_boot.img once, then reboot and run "
+                           "verify-root --method usb-fastboot with this patch-result.json. "
+                           "The US patch source is not an original ROW backup.")
     save(device.s.path / "patch-result.json", receipt)
     require(re.fullmatch(r"/data/local/tmp/onn26-patch-[0-9a-f]{32}", remote), "Unexpected cleanup path")
     device.shell("remove-own-staging", "rm", "-rf", remote)
@@ -461,8 +532,10 @@ def parser():
     u.add_argument("--accept-data-loss", action="store_true",
                    help="Accept erasing all user apps, accounts, settings and local data; "
                         "complete the factory reset in Android Recovery after the unlock reboot")
-    sub.add_parser("fetch-inputs", help="Download pinned official OTA/Magisk and extract init_boot")
+    fetch = sub.add_parser("fetch-inputs", help="Download pinned official OTA/Magisk and extract init_boot")
+    add_root_method_argument(fetch)
     root = sub.add_parser("prepare-root", help="Patch init_boot on the selected device; no firmware flash")
+    add_root_method_argument(root)
     root.add_argument("--stock-init-boot", type=Path, default=ROOT / "cache/firmware/init_boot.img")
     root.add_argument("--magisk-apk", type=Path, default=ROOT / "cache/Magisk-v30.7.apk")
     import root_workflow
@@ -486,7 +559,12 @@ def main(argv=None):
                 verify_files()
                 result = {"packaged_inputs_verified": True}
             elif args.command == "fetch-inputs":
-                result = fetch_inputs(session)
+                import connection
+                saved = connection.load(args.connection) if args.connection else None
+                binding = saved["binding"] if saved else None
+                if binding is None and args.target:
+                    binding = Device(session, args.target, args.adb).identify()
+                result = fetch_inputs(session, binding, args.method)
             elif args.command == "devices":
                 import connection
                 result = connection.devices(args.work)
@@ -505,7 +583,7 @@ def main(argv=None):
                 elif args.command == "unlock":
                     result = unlock(device, args.accept_data_loss)
                 elif args.command == "prepare-root":
-                    result = prepare_root(device, args.stock_init_boot, args.magisk_apk)
+                    result = prepare_root(device, args.stock_init_boot, args.magisk_apk, args.method)
                 else:
                     import root_workflow
                     result = root_workflow.run(device, args)

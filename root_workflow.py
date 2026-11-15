@@ -1,4 +1,4 @@
-"""Network-only DSU workflow for the single pinned firmware profile."""
+"""Guarded DSU workflow and read-only verification of manually USB-flashed root."""
 import base64
 import gzip
 import hashlib
@@ -26,8 +26,9 @@ def read(path):
     return json.loads(Path(path).read_text())
 
 
-def bound(device, record):
+def bound(device, record, method="dsu"):
     device.identify(unlocked=True)
+    o.patch_source_profile(device.binding, method)
     o.require(record["binding"] == device.binding, "Receipt belongs to another device, build, or slot")
 
 
@@ -72,12 +73,14 @@ def root(device, label, command, helper="/system/bin/onn26-su", **kwargs):
     return device.shell(label, helper, "-c", command, **kwargs)
 
 
-def partition_guard(binding):
+def partition_guard(binding, method="dsu"):
     """Shell preconditions for every privileged read of the bound partition.
 
     Callers use set -e. The flash template independently repeats these checks
     immediately before its sole write, alongside the image and identity guards.
     """
+    o.patch_source_profile(binding, method)
+    profile = o.active_profile(binding)
     slot = o.slot_profile(binding)
     partition = shlex.quote(o.root_partition(binding))
     block = shlex.quote(slot["root_block_path"])
@@ -85,7 +88,7 @@ def partition_guard(binding):
     return ("test \"$(getprop ro.boot.slot_suffix)\" = " + shlex.quote(binding["ro.boot.slot_suffix"]) + "; "
             "test -b " + partition + "; "
             "test \"$(readlink -f " + partition + ")\" = " + block + "; "
-            "test \"$(cat " + size_path + ")\" = " + str(o.PROFILE["init_boot_size"] // 512) + "; ")
+            "test \"$(cat " + size_path + ")\" = " + str(profile["init_boot_size"] // 512) + "; ")
 
 
 def partition_hash_command(binding):
@@ -99,6 +102,8 @@ def reboot_verified(device, kind, proof):
               and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", proof["boot_id"]),
               "The completed step has no valid boot record; no restart")
     device.identify(unlocked=kind == "install")
+    if kind == "install":
+        o.require_dsu_support(device.binding)
     o.require(proof.get("binding") == device.binding, "Restart proof belongs to another onn, build, or slot")
     boot = device.boot_id()
     if kind == "unlock":
@@ -158,8 +163,9 @@ def reboot_verified(device, kind, proof):
 
 def build_matches(device, build):
     device.identify(unlocked=True)
+    profile = o.require_dsu_support(device.binding)
     expected = {"serial": device.binding["ro.serialno"], "profile": o.slot_profile(device.binding)["id"],
-                "fingerprint": o.PROFILE["fingerprint"], "bootloader": o.PROFILE["bootloader"],
+                "fingerprint": profile["fingerprint"], "bootloader": profile["bootloader"],
                 "slot": device.binding["ro.boot.slot_suffix"]}
     o.require(all(build.get(k) == v for k, v in expected.items()), "DSU build binding mismatch")
     o.require(build.get("single_use_required") is True and build.get("root_helper_autostart") is False,
@@ -170,6 +176,7 @@ def build_matches(device, build):
 
 def build_dsu(device, args):
     device.identify(unlocked=True)
+    o.require_dsu_support(device.binding)
     o.verify_files()
     print("Preparing the temporary Android systems on this computer (15-minute build limit). "
           "Ctrl-C stops the build; the guide can resume it.", flush=True)
@@ -193,6 +200,7 @@ def build_dsu(device, args):
             stream.write(data)
     output = device.s.path / "dsu-build"
     host_build.run(device.s, "build-offline-dsu", [sys.executable, o.ROOT / "tools/build_dsu.py",
+                 "--firmware-profile", o.active_profile(device.binding)["id"],
                  "--serial", device.binding["ro.serialno"], "--slot", device.binding["ro.boot.slot_suffix"],
                  "--images", images,
                  "--ndk", args.ndk.resolve(), "--adb-public-key", args.adb_public_key.resolve(),
@@ -325,9 +333,18 @@ def stock_return(device, args):
     return {**result, "rehearsal": str(device.s.path / "stock-return.json")}
 
 
-def patch_receipt(device, path):
+def patch_receipt(device, path, method="dsu"):
     receipt = read(path)
-    bound(device, receipt)
+    bound(device, receipt, method)
+    o.require(receipt.get("root_method", "dsu") == method, "Patch receipt belongs to another root method")
+    if method == "usb-fastboot":
+        source = o.patch_source_profile(device.binding, method)
+        o.require(receipt.get("patch_source_profile") == source["id"]
+                  and receipt.get("patch_source_fingerprint") == source["fingerprint"]
+                  and receipt.get("patch_source_image", {}).get("sha256") == source["init_boot_sha256"]
+                  and receipt.get("original_device_backup") is False
+                  and receipt.get("fastboot_partition") == o.slot_profile(device.binding)["root_partition"],
+                  "USB patch source or target partition differs from the approved receipt")
     o.require(receipt.get("patched_on_target") is True and receipt.get("ramdisk_verified") is True,
               "Only a verified on-target patch is accepted")
     o.require(receipt["magisk_apk_sha256"] == o.PROFILE["magisk_apk_sha256"], "Magisk version changed")
@@ -357,14 +374,15 @@ def pull_block(device, helper, dest):
 
 
 def flash_script(binding, boot, remote, attempt, patch_hash):
+    profile = o.require_dsu_support(binding)
     slot = o.slot_profile(binding)
-    values = {"SERIAL": binding["ro.serialno"], "FINGERPRINT": o.PROFILE["fingerprint"],
-              "BOOTLOADER": o.PROFILE["bootloader"], "BOOT_ID": boot,
+    values = {"SERIAL": binding["ro.serialno"], "FINGERPRINT": profile["fingerprint"],
+              "BOOTLOADER": profile["bootloader"], "BOOT_ID": boot,
               "SLOT": binding["ro.boot.slot_suffix"], "PARTITION": o.root_partition(binding),
               "BLOCK_PATH": slot["root_block_path"],
               "SIZE_PATH": "/sys/class/block/" + Path(slot["root_block_path"]).name + "/size",
               "PATCH_PATH": remote + "/patched-init_boot.img", "STOCK_PATH": remote + "/stock-init_boot.img",
-              "PATCH_SHA256": patch_hash, "STOCK_SHA256": o.PROFILE["init_boot_sha256"], "ATTEMPT_PATH": attempt}
+              "PATCH_SHA256": patch_hash, "STOCK_SHA256": profile["init_boot_sha256"], "ATTEMPT_PATH": attempt}
     template = (o.ROOT / "native/flash_init_boot.sh.in").read_text()
     for name, value in values.items():
         template = template.replace("@@" + name + "@@", shlex.quote(value))
@@ -436,7 +454,8 @@ def install_root(device, args):
 
 
 def verify_root(device, args):
-    patch, _ = patch_receipt(device, args.patch_result)
+    method = getattr(args, "method", "dsu")
+    patch, _ = patch_receipt(device, args.patch_result, method)
     boot = device.boot_id()
     o.require(boot != patch["boot_id"], "No reboot after image preparation")
     aid = device.text("original-installation", "settings", "get", "secure", "android_id")
@@ -444,7 +463,7 @@ def verify_root(device, args):
     current = state(device)
     o.require(current in ("normal", "installed\ndisabled"), "DSU is still running or enabled")
     partition = o.root_partition(device.binding)
-    command = ("set -e; " + partition_guard(device.binding) +
+    command = ("set -e; " + partition_guard(device.binding, method) +
                "id; /debug_ramdisk/magisk -v; /debug_ramdisk/magisk -V; getenforce; "
                "sha256sum " + shlex.quote(partition) + "; "
                "test -s /data/adb/magisk/busybox; test -s /data/adb/magisk/magiskboot; "
@@ -464,10 +483,17 @@ def verify_root(device, args):
               "30.7:MAGISK:R" in lines and "30700" in lines and "Enforcing" in lines and
               patch["patched_image"]["sha256"] + "  " + partition in lines and
               "MAGISK_ENVIRONMENT_COMPLETE" in lines, "Permanent root/environment verification failed" + receipts)
+    if method == "usb-fastboot":
+        device.identify(unlocked=True)
+        o.require(device.boot_id() == boot and state(device) == current,
+                  "Device boot or DSU state changed during root verification")
     report = {"at": o.now(), "binding": device.binding, "boot_id": boot, "android_id": aid,
               "root_verified": True, "magisk_version": "30.7", "selinux_enforcing": True,
               "partition": partition, "partition_sha256": patch["patched_image"]["sha256"], "environment_complete": True,
               "dsu_state": current, "firmware_written": False}
+    if method == "usb-fastboot":
+        report.update(root_method=method, patch_source_profile=patch["patch_source_profile"],
+                      original_device_backup=False)
     o.save(device.s.path / "root-verification.json", report)
     return report
 
@@ -548,6 +574,7 @@ def add_parsers(sub):
     install.add_argument("--accept-unproven-recovery", action="store_true")
     verify = sub.add_parser("verify-root", help="Check permanent Magisk, original Android, SELinux and partition hash")
     verify.add_argument("--patch-result", type=Path, required=True)
+    o.add_root_method_argument(verify)
     cleanup = sub.add_parser("cleanup-root", help="After root verification, save stock backup and remove this workflow's DSU")
     cleanup.add_argument("--install-result", type=Path, required=True)
     sub.add_parser("disable-updates", help="Persist Android's automatic system-update preference as disabled")
@@ -557,6 +584,12 @@ def add_parsers(sub):
 
 def run(device, args):
     o.verify_files()
+    if args.command not in ("disable-updates", "updates-status", "enable-updates"):
+        device.identify(unlocked=True)
+        if args.command == "verify-root":
+            o.patch_source_profile(device.binding, getattr(args, "method", "dsu"))
+        else:
+            o.require_dsu_support(device.binding)
     handlers = {"build-dsu": build_dsu, "stage-dsu": stage_dsu, "dsu-status": dsu_status,
                 "boot-dsu": boot_dsu, "confirm-stock-return": stock_return, "install-root": install_root,
                 "verify-root": verify_root, "cleanup-root": cleanup_root,

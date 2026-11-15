@@ -3,6 +3,11 @@
 For the normal guided walkthrough, run `python3 onn2026.py` from the repository
 folder. You do not need to enter the commands below when using the guide.
 
+The root and DSU commands here require the pinned **US 15640252** firmware.
+For **Canada/ROW 15016191**, use the separate [manual unlock and USB fastboot
+instructions](ROW.md). The USB route explicitly uses a pinned US patch source;
+it does not provide original ROW backup images or enable ROW DSU rooting.
+
 These lower-level commands are for inspecting receipts or carrying out a
 reviewed manual workflow. Do not mix them into an active guide. Read the
 [factory-reset and bricking warnings](../README.md) and

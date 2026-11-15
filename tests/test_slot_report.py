@@ -57,7 +57,7 @@ class FakeADB:
             output = "\n".join(key + "=" + value for key, value in values.items()) + "\n"
             return subprocess.CompletedProcess(argv, 0, output, "")
         guard, command = script.rsplit("\n", 1)
-        assert "|| exit 90" in guard and SERIAL in guard and BOOT in guard
+        assert "|| exit 90" in guard and self.values["ro.serialno"] in guard and BOOT in guard
         query = tuple(shlex.split(command))
         self.queries.append(query)
         if self.guard_fails:

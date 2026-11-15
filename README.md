@@ -25,6 +25,17 @@ The guide runs the commands and restarts, keeps track of the files, looks for th
 same onn after IP changes, verifies permanent root, and turns off automatic system updates.
 A USB data cable or USB drive is not required.
 
+**Canada/ROW (`JCA` serial):** selecting the exact supported Canadian build opens
+a Canadian-only menu for **USB rooting or status**. Before proceeding, it explains
+that PR author kushmint reports successful USB root on Canadian slot A and that
+we have not independently tested this method on hardware. Users can accept that
+risk and continue. The walkthrough handles unlock when needed, prepares a
+US-sourced `init_boot` on the intended Canadian device, shows the bound USB flash
+commands for the owner to run, and verifies permanent root afterward.
+See [the Canada/ROW instructions](docs/ROW.md). Firmware comes from its official
+sources, not this repository. Canadian DSU rooting remains unavailable; the
+network-only DSU flow below applies to US units and does not offer USB rooting.
+
 **Measured result, November 10, 2026:** persistent unlock and permanent
 **Magisk 30.7** root worked on one replacement unit on **slot B**. Root survived normal Android
 boot and Magisk’s additional-setup reboot. The original Android installation
@@ -32,7 +43,7 @@ returned, SELinux remained **Enforcing**, the flashed image matched its readback
 and the temporary DSU installation was removed. No temporary-root exploit or
 custom startup script was used.
 
-| Supported item | Exact value |
+| Supported US guided-install item | Exact value |
 | --- | --- |
 | Device | 2026 onn 4K Pro, `jarvis2`, AMLS905X5M / S7D |
 | Android | **14**, API **34** |
@@ -44,9 +55,10 @@ custom startup script was used.
 | Root target | Active **`init_boot_a`** (`mmcblk0p22`) or **`init_boot_b`** (`mmcblk0p23`), 8 MiB |
 
 This is support for that **exact build**, not every Android 14 firmware.
-Other builds, Android versions, and the older 2024 `jarvis` are
-outside the supported profile. The script checks these values and stops on a
-mismatch. Do not edit the profile to bypass a mismatch.
+Other builds and Android versions are outside the guided root profile. The
+separate ROW profile supports the manual USB route described above. The older 2024
+`jarvis` uses a different project. The script checks these values and stops on a
+mismatch. Do not edit the profiles to bypass a mismatch.
 
 **Both active slots have successful unlock and root results on the supported
 firmware.** The project maintainer confirmed successful community slot-A

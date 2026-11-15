@@ -385,3 +385,73 @@ does not repeat the unlock. Package hashes, preview/CLI help, Python syntax,
 static-site HTML/JSON-LD and whitespace checks passed. Logs are in ignored
 `work/slot-a-and-unlock-recovery-update/`. No physical device was contacted and
 no website deployment was performed.
+
+## Canada/ROW profile integration — November 15, 2026
+
+The Canada/ROW contribution from [PR #4](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/pull/4)
+is integrated for the exact `JCA` / `jarvis2_row` 15016191 firmware and bootloader
+in `profile.json`. Status, saved connections, reconnect and manual unlock retain
+the selected physical serial, firmware and active slot. The unlock protocol is
+unchanged; the helper now accepts the matching regional serial/fingerprint pair.
+The packaged helper was rebuilt with NDK 28.2.13676358, API 28, `-O2`, and no
+additional Android logging library. A second build reproduced both shipped
+helper hashes exactly.
+
+ROW has its own slot IDs and capability metadata, with no inherited US stock
+hashes or DSU images. DSU commands reject ROW before using inputs or changing
+the device; the guide selects a separate Canadian-only USB menu.
+The standalone DSU builder also validates the selected firmware profile and
+serial before probing tools. The existing US build remains the default for
+offline downloads and builds; an explicitly selected device or connection is
+checked before downloading. ROW diagnostic stock-image comparisons are unknown
+when no reference hash exists.
+
+For the contributor's separate manual USB route, `fetch-inputs`, `prepare-root`
+and `verify-root` accept explicit `--method usb-fastboot` only on the pinned ROW
+profile. US units cannot select it; their guide retains the DSU flow. The pinned
+US init_boot source is downloaded from Google's OTA, patched on the selected ROW
+device and recorded separately from an original ROW backup. Preparation neither
+flashes nor reboots. The manual flash instructions require the same physical
+serial and active slot in Android and fastboot. Post-reboot verification checks
+the receipt, original Android identity, Magisk, SELinux and active-partition hash.
+It cannot enable a DSU writer or create a false original-stock backup.
+
+The Canadian menu discloses kushmint's PR hardware report and the lack of an
+independent maintainer hardware test. It offers status only or USB rooting with
+explicit risk acceptance. Its separate progress file keeps unlock, preparation,
+manual USB instructions and root verification out of the US DSU phases. It
+requests no USB flash/reboot itself and saves the next verification step before
+showing the owner's commands, so resuming cannot issue them again. Declining
+the warning stops before preparation. Already-unlocked units skip unlock/reset.
+
+Validation:
+
+- **241 Python tests passed**, including the existing **32 regular-file flash
+  cases** across slots A/B. New tests cover ROW identities, serial/region
+  mismatches, saved connections after an address change, exact native unlock
+  arguments, consumed attempts, early DSU refusal, diagnostic privacy and
+  stock-hash reporting. The real host-only guide download adapter is exercised
+  with no live device object, using its saved firmware binding.
+- USB tests exercise on-target patching and permanent-root verification through
+  fake ADB on both ROW slots using synthetic images. US refusal, explicit CLI
+  dispatch, source/method/serial/slot/image mismatches, guest or unchanged boots,
+  denied root and failed partition proof are covered. No physical USB operation
+  is performed by these tests.
+- Canadian menu tests cover consent and decline, locked/unlocked units on both
+  slots, separate progress, interruption recovery, root-permission retry and
+  refusal of US identities or DSU transitions. The standard US entry point is
+  checked alongside the Canadian dispatch. Real USB adapters are exercised
+  with fake ADB through preparation, saved instructions and root verification.
+- The Python suite also compiles the actual native unlock entry point against
+  a host Android-property stub. US/ROW identities on both slots reach the exact
+  property checks; malformed serials, mixed regions, wrong UIDs and invalid
+  marker paths are rejected before those checks. The stub always stops before
+  boot-ID, marker or TEE access.
+- All **11 native unlock-protocol scenarios** passed. A timeout or uncertain
+  result still cannot replay a write.
+
+Evidence is retained under ignored `work/row-integration-20261115/`. No physical
+device was contacted. ROW hardware results remain the contributor's slot-A
+report, not a live validation by this integration. No ROW DSU image was built
+or installed; matching firmware inputs and hardware verification are still
+required. See [the Canada/ROW support boundary](ROW.md).

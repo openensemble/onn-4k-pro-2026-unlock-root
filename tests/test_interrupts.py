@@ -35,7 +35,9 @@ from guide_core import UI, working
 directory, transport, operation = sys.argv[1:]
 device = o.Device(o.Session(Path(directory) / 'receipts', 'interrupt-fixture'),
                   '192.0.2.71:5555', transport)
-device.binding = {'ro.boot.slot_suffix': '_b'}
+device.binding = {'ro.serialno': 'JUSAINTERRUPTTEST', 'ro.product.device': o.PROFILE['device'],
+                  'ro.build.fingerprint': o.PROFILE['fingerprint'], 'ro.bootloader': o.PROFILE['bootloader'],
+                  'ro.boot.slot_suffix': '_b'}
 with working(UI(emit=lambda message: None), protect=True) as cancellation:
     if operation == 'command':
         result = device.call('critical-command-fixture', 'fixture-only', timeout=5)

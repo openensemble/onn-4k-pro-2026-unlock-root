@@ -89,7 +89,7 @@ REPEATABLE = {"host", "baseline", "unlocked_check", "fetch", "build", "stock_wai
               "stock_return", "root_ready", "normal_check", "verify", "updates_check"}
 PREVIEW = """2026 onn unlock and root guide
 
-The exact supported firmware may run on active slot A or B. The guide keeps
+The supported US firmware (15640252) may run on active slot A or B. The guide keeps
 that slot throughout. Slot A has successful community unlock/root reports;
 slot B has measured hardware verification.
 
@@ -171,8 +171,8 @@ def show_debugging_setup(ui):
     ui.wait(DEBUGGING_SETUP, title="Enable debugging on your onn")
 
 
-def ask_device_name(ui, serial):
-    ui.page("Name your onn", "Found supported 2026 onn | Android 14 | build 15640252\nHardware serial: " + serial)
+def ask_device_name(ui, serial, build="15640252"):
+    ui.page("Name your onn", "Found supported 2026 onn | Android 14 | build " + build + "\nHardware serial: " + serial)
     return ui.ask("Give this onn a name, such as Living room (Enter uses its serial): ") or serial
 
 
@@ -188,6 +188,9 @@ def show_stopped(ui):
 def slot_notice(binding):
     slot = binding.get("ro.boot.slot_suffix")
     require(slot in ("_a", "_b"), "The selected onn has no supported active slot")
+    if binding.get("ro.build.fingerprint", "").startswith("onn/jarvis2_row/"):
+        return ("Active slot " + slot[-1].upper() + ": Canada/ROW firmware. "
+                "Guided DSU rooting is unavailable. See docs/ROW.md.\n\n")
     if slot == "_a":
         return "Active slot A: unlock and root have been confirmed by community reports for this firmware.\n\n"
     return "Active slot B: unlock and root have been verified on hardware for this firmware.\n\n"

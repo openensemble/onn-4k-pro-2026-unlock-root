@@ -88,6 +88,9 @@ def host_setup(args, ui):
 
 
 class Backend:
+    reconnect_help = ("The installation image normally starts network debugging automatically on port 5555.\n"
+                      "Try its current IP:5555 once the network is connected. If that fails:\n")
+
     def __init__(self, args, connection_file, ui):
         self.args, self.path, self.ui = args, Path(connection_file).resolve(), ui
         self.binding = connection.load(self.path)["binding"]
@@ -113,8 +116,7 @@ class Backend:
                 return SimpleNamespace(s=session, device=device)
             except (o.Stop, OSError, ValueError) as error:
                 self.ui.page("Reconnect your onn", "The selected onn could not be reached and verified.\n"
-                             "The installation image normally starts network debugging automatically on port 5555.\n"
-                             "Try its current IP:5555 once the network is connected. If that fails:\n"
+                             + self.reconnect_help +
                              "Check Developer mode, USB debugging and Wi-Fi/network debugging.\n"
                              "Wireless debugging can use a new connection port after each reboot.\n"
                              "If pairing is required, choose 'Pair device with pairing code' on the TV,\n"
@@ -153,7 +155,7 @@ class Backend:
         if phase in ("unlock_reboot", "install_reboot"):
             return flow.reboot_verified(device, phase.removesuffix("_reboot"), values["proof"])
         if phase == "fetch":
-            return o.fetch_inputs(context.s)
+            return o.fetch_inputs(context.s, self.binding)
         if phase == "patch":
             return o.prepare_root(device, values["stock_init_boot"], values["magisk_apk"])
         if phase == "build":
@@ -230,7 +232,8 @@ def select_connection(args, ui):
             ui.page("Check the connection", "This onn is not connected and verified yet: " + str(error))
             value = ui.ask("Press Enter to check that address again, enter a different IP, or q to leave: ")
             target = value or target
-    name = ask_device_name(ui, props["ro.serialno"])
+    profile = o.active_profile(props)
+    name = ask_device_name(ui, props["ro.serialno"], profile["fingerprint"].split("/")[-2].split(":")[0])
     confirm_device(ui, name, props["ro.serialno"])
     return Path(connection.remember(device, name))
 
@@ -252,6 +255,13 @@ def start(args, ui=None):
             selected = select_connection(args, ui)
             record = connection.load(selected)
             directory = args.work / "devices" / hashlib.sha256(record["binding"]["ro.serialno"].encode()).hexdigest()
+            if o.active_profile(record["binding"]).get("usb_fastboot_patch_source_profile"):
+                if args.restart_dsu:
+                    o.require_dsu_support(record["binding"])
+                import row_usb_guide
+                path = directory / "usb-guide.json"
+                return row_usb_guide.start(args, selected, record, path, ui)
+            o.require_dsu_support(record["binding"])
             path = directory / "guide.json"
             restarting = args.restart_dsu or bool(dsu_recovery.pending(directory))
             if path.exists():

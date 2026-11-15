@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect a read-only jarvis2 slot report without using the unlock installer."""
+"""Collect a read-only US/ROW jarvis2 slot report without using the unlock installer."""
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -15,6 +15,9 @@ import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from connection_identity import SERIAL_PATTERN
+
 PROPERTIES = (
     "ro.product.device", "ro.product.model", "ro.soc.model", "ro.board.platform",
     "ro.build.fingerprint", "ro.build.id", "ro.build.version.incremental",
@@ -54,8 +57,8 @@ def network_target(value):
 
 
 def hardware_serial(value):
-    if not re.fullmatch(r"JUSA[A-Za-z0-9]+", value):
-        raise argparse.ArgumentTypeError("Use the jarvis2 hardware serial beginning with JUSA")
+    if not re.fullmatch(SERIAL_PATTERN, value):
+        raise argparse.ArgumentTypeError("Use the jarvis2 hardware serial beginning with JUSA (US) or JCA (Canada/ROW)")
     return value
 
 
@@ -167,7 +170,7 @@ class Collector:
                 raise Stop("Malformed device identity response; collection stopped.")
             values[key] = value
         self.secrets.update(values.get(key, "") for key in ("ro.serialno", "boot_id"))
-        if (not re.fullmatch(r"JUSA[A-Za-z0-9]+", values.get("ro.serialno", ""))
+        if (not re.fullmatch(SERIAL_PATTERN, values.get("ro.serialno", ""))
                 or values.get("ro.product.device") != "jarvis2"):
             raise Stop("The selected device is not an identified 2026 jarvis2 onn.")
         if self.expected_serial and values["ro.serialno"] != self.expected_serial:
@@ -204,17 +207,24 @@ class Collector:
                 raise Stop("Android requires debugging authorization. Accept it on the selected onn and rerun.")
             values = self.snapshot()
             self.report["properties"] = {key: values.get(key) or None for key in PROPERTIES}
+            profiles = (self.profile, *self.profile.get("variants", {}).values())
+            profile = next((p for p in profiles if p["fingerprint"] == values["ro.build.fingerprint"]), self.profile)
             self.report["profile_comparison"] = {
-                "firmware_matches": values["ro.build.fingerprint"] == self.profile["fingerprint"],
-                "bootloader_matches": values["ro.bootloader"] == self.profile["bootloader"],
-                "abi_matches": self.profile["abi"] in values.get("ro.product.cpu.abilist", "").split(","),
-                "installer_supported_slots": sorted(self.profile["slots"]),
-                "active_slot_matches_installer": values["ro.boot.slot_suffix"] in self.profile["slots"],
+                "compared_profile": profile["id"],
+                "firmware_matches": values["ro.build.fingerprint"] == profile["fingerprint"],
+                "bootloader_matches": values["ro.bootloader"] == profile["bootloader"],
+                "serial_region_matches": any(values["ro.serialno"].startswith(p) for p in profile["serial_prefixes"]),
+                "abi_matches": profile["abi"] in values.get("ro.product.cpu.abilist", "").split(","),
+                "installer_supported_slots": sorted(profile["slots"]) if profile.get("dsu_root_supported") else [],
+                "active_slot_matches_installer": bool(profile.get("dsu_root_supported")) and values["ro.boot.slot_suffix"] in profile["slots"],
                 "active_slot_a": values["ro.boot.slot_suffix"] == "_a",
             }
             comparison = self.report["profile_comparison"]
-            matches = all(comparison[key] for key in ("firmware_matches", "bootloader_matches", "abi_matches"))
-            slot = self.profile["slots"].get(values["ro.boot.slot_suffix"], {})
+            matches = all(comparison[key] for key in ("firmware_matches", "bootloader_matches", "abi_matches", "serial_region_matches"))
+            comparison["dsu_root_supported"] = matches and profile.get("dsu_root_supported") is True
+            slot = profile["slots"].get(values["ro.boot.slot_suffix"], {})
+            if profile.get("usb_fastboot_patch_source_profile"):
+                comparison["fastboot_root_hardware_reported"] = matches and slot.get("fastboot_root_hardware_reported") is True
             for kind in ("unlock", "root_method"):
                 comparison[kind + "_hardware_verified"] = matches and slot.get(kind + "_hardware_verified") is True
             self.report["shell_uid"] = parsed(self.query("shell-uid", "id", "-u"), integer)
@@ -225,7 +235,7 @@ class Collector:
             self.report["proc_partitions_access"] = result_status(proc)
             for name in PARTITIONS:
                 self.progress("Reading " + name + " metadata...")
-                entry = self.read_partition(name, sizes)
+                entry = self.read_partition(name, sizes, profile if matches else None)
                 self.report["partitions"][name] = entry
             self.read_boot_control()
             self.report["update_engine"] = parsed(
@@ -241,7 +251,7 @@ class Collector:
             self.report["stop_reason"] = str(error)
         return self.public_report()
 
-    def read_partition(self, name, proc_sizes):
+    def read_partition(self, name, proc_sizes, reference_profile=None):
         path = "/dev/block/by-name/" + name
         mapping = parsed(self.query(name + "-mapping", "readlink", "-f", path),
                          lambda text: text if re.fullmatch(r"/dev/block/mmcblk0p[0-9]+", text) else None)
@@ -258,7 +268,7 @@ class Collector:
             size = entry["size"]
             if size["status"] != "ok":
                 entry["sha256"] = {"status": "size_unverified"}
-            elif size["bytes"] != self.profile["init_boot_size"]:
+            elif size["bytes"] != (reference_profile or self.profile)["init_boot_size"]:
                 entry["sha256"] = {"status": "unexpected_size"}
             else:
                 # Only hash the named init_boot partition after checking its length.
@@ -267,7 +277,9 @@ class Collector:
                     lambda text: text.split()[0] if re.fullmatch(
                         r"[0-9a-f]{64}  " + re.escape(path), text) else None)
                 if digest["status"] == "ok":
-                    digest["matches_reference_stock_image"] = digest["value"] == self.profile["init_boot_sha256"]
+                    reference = (reference_profile or {}).get("init_boot_sha256")
+                    digest["reference_stock_image_available"] = reference is not None
+                    digest["matches_reference_stock_image"] = digest["value"] == reference if reference else None
                 entry["sha256"] = digest
         return entry
 
@@ -306,7 +318,7 @@ class Collector:
             if isinstance(value, str):
                 for secret in sorted(filter(None, self.secrets), key=len, reverse=True):
                     value = value.replace(secret, "[redacted]")
-                return re.sub(r"JUSA[A-Za-z0-9]+", "[redacted]", value)
+                return re.sub(SERIAL_PATTERN, "[redacted]", value)
             return value
         return scrub(self.report)
 

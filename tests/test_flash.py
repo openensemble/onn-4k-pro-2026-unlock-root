@@ -100,7 +100,9 @@ if os.environ['ONN26_FIXTURE_CASE'] in ('partial-write', 'readback-failure'):
 os.execv('/bin/dd', ['dd', *sys.argv[1:]])
 ''')
             path.chmod(0o700)
-            binding = {"ro.serialno": "JUSA123456", "ro.boot.slot_suffix": slot}
+            binding = {"ro.serialno": "JUSA123456", "ro.boot.slot_suffix": slot,
+                       "ro.build.fingerprint": o.PROFILE["fingerprint"], "ro.bootloader": o.PROFILE["bootloader"],
+                       "ro.product.device": o.PROFILE["device"]}
             with patch.dict(o.PROFILE, {"init_boot_sha256": stock_hash}):
                 script = flow.flash_script(binding, BOOT, str(root), str(attempt), image_hash)
             # Test-only conversion. The shipped template has no fixture mode and

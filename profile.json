@@ -3,6 +3,39 @@
   "device": "jarvis2",
   "fingerprint": "onn/jarvis2/jarvis2:14/URO3.260203.035.A1/15640252:user/release-keys",
   "bootloader": "01.01.260525.135322",
+  "serial_prefixes": ["JUSA"],
+  "dsu_root_supported": true,
+  "variants": {
+    "jarvis2-row-15016191": {
+      "id": "jarvis2-row-15016191",
+      "device": "jarvis2",
+      "fingerprint": "onn/jarvis2_row/jarvis2:14/URO3.260203.009.A2/15016191:user/release-keys",
+      "bootloader": "01.01.260304.134947",
+      "serial_prefixes": ["JCA"],
+      "abi": "armeabi-v7a",
+      "dsu_root_supported": false,
+      "usb_fastboot_patch_source_profile": "jarvis2-15640252",
+      "init_boot_size": 8388608,
+      "slots": {
+        "_a": {
+          "id": "jarvis2-row-15016191-a",
+          "root_partition": "init_boot_a",
+          "root_block_path": "/dev/block/mmcblk0p22",
+          "root_method_hardware_verified": false,
+          "unlock_hardware_verified": true,
+          "fastboot_root_hardware_reported": true
+        },
+        "_b": {
+          "id": "jarvis2-row-15016191-b",
+          "root_partition": "init_boot_b",
+          "root_block_path": "/dev/block/mmcblk0p23",
+          "root_method_hardware_verified": false,
+          "unlock_hardware_verified": false,
+          "fastboot_root_hardware_reported": false
+        }
+      }
+    }
+  },
   "slots": {
     "_a": {
       "id": "jarvis2-15640252-a",

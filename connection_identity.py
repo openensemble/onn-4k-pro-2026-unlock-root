@@ -2,12 +2,13 @@
 import re
 
 FIELDS = ("ro.serialno", "ro.product.device", "ro.build.fingerprint", "ro.bootloader", "ro.boot.slot_suffix")
+SERIAL_PATTERN = r"(?:JUSA|JCA)[A-Za-z0-9]+"
 
 
 def validate_binding(binding):
     if not isinstance(binding, dict) or any(not isinstance(binding.get(k), str) or not binding[k] for k in FIELDS):
         raise ValueError("A complete saved hardware and firmware binding is required")
-    if not re.fullmatch(r"JUSA[A-Za-z0-9]+", binding["ro.serialno"]):
+    if not re.fullmatch(SERIAL_PATTERN, binding["ro.serialno"]):
         raise ValueError("Invalid saved hardware serial")
     return {key: binding[key] for key in FIELDS}
 

@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import stat
 import subprocess
@@ -89,10 +88,16 @@ def compress(source, dest):
 
 def build(args):
     o.require(__debug__, "Python optimization disables parser assertions; omit -O")
+    profiles = {p["id"]: p for p in (o.PROFILE, *o.PROFILE.get("variants", {}).values())}
+    profile = profiles[getattr(args, "firmware_profile", o.PROFILE["id"])]
+    binding = {"ro.serialno": args.serial, "ro.product.device": profile["device"],
+               "ro.build.fingerprint": profile["fingerprint"], "ro.bootloader": profile["bootloader"],
+               "ro.boot.slot_suffix": args.slot, "ro.product.cpu.abilist": profile["abi"]}
+    o.require_dsu_support(binding)
+    o.validate_identity(binding)
+    slot = o.slot_profile(binding)
     progress("Checking the computer's EROFS tools...")
     check_erofs_tools(args.mkfs_erofs, args.fsck_erofs)
-    o.require(re.fullmatch(r"JUSA[A-Za-z0-9]+", args.serial), "Invalid hardware serial")
-    slot = o.slot_profile({"ro.boot.slot_suffix": args.slot})
     o.require(o.PROFILE["ndk_version"] in (args.ndk / "source.properties").read_text(),
               "Use the recorded Android NDK revision")
     o.require(o.digest(args.avbtool) == o.PROFILE["avbtool"]["sha256"], "AVB tool hash mismatch")
@@ -104,7 +109,7 @@ def build(args):
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     roots = {}
-    for name, pin in o.PROFILE["dsu_partitions"].items():
+    for name, pin in profile["dsu_partitions"].items():
         progress("Checking the stock " + name + " image...")
         image = args.images / (name + ".img")
         o.require(image.stat().st_size == pin["size"] and o.digest(image) == pin["sha256"],
@@ -119,8 +124,8 @@ def build(args):
     progress("Copying the temporary system's files...")
     shutil.copytree(roots["system"], tree, symlinks=True)
 
-    header = {"ONN26_SERIAL": args.serial, "ONN26_FINGERPRINT": o.PROFILE["fingerprint"],
-              "ONN26_BOOTLOADER": o.PROFILE["bootloader"], "ONN26_SLOT": args.slot}
+    header = {"ONN26_SERIAL": args.serial, "ONN26_FINGERPRINT": profile["fingerprint"],
+              "ONN26_BOOTLOADER": profile["bootloader"], "ONN26_SLOT": args.slot}
     (out / "onn26_binding.h").write_text("".join(
         "#define " + k + " " + json.dumps(v) + "\n" for k, v in header.items()))
     compiler = args.ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi28-clang"
@@ -217,11 +222,11 @@ def build(args):
     shutil.copyfile(erofs, image)
     avb = [sys.executable, args.avbtool]
     command([*avb, "add_hashtree_footer", "--image", image, "--partition_name", "system",
-             "--partition_size", str(o.PROFILE["dsu_partitions"]["system"]["size"]),
+             "--partition_size", str(profile["dsu_partitions"]["system"]["size"]),
              "--algorithm", "NONE", "--hash_algorithm", "sha256", "--block_size", "4096",
              "--do_not_generate_fec", "--salt", "9c36d1cb9303ad93fda0f340d31b24ccf8892ee3a1d9198bb6b94acf0772d625",
              "--prop", "com.android.build.system.os_version:14", "--prop",
-             "com.android.build.system.fingerprint:" + o.PROFILE["fingerprint"], "--prop",
+             "com.android.build.system.fingerprint:" + profile["fingerprint"], "--prop",
              "com.android.build.system.security_patch:2026-06-01"], out / "avb-footer.log",
              "Adding Android verification data")
     command([*avb, "verify_image", "--image", image], out / "avb-verify.log",
@@ -229,7 +234,7 @@ def build(args):
     compress(image, out / "system.root.raw.gz")
     compress(args.images / "system.img", out / "system.stock.raw.gz")
     result = {"at": o.now(), "profile": slot["id"], "serial": args.serial,
-              "fingerprint": o.PROFILE["fingerprint"], "bootloader": o.PROFILE["bootloader"],
+              "fingerprint": profile["fingerprint"], "bootloader": profile["bootloader"],
               "slot": args.slot, "system_bytes": image.stat().st_size,
               "root_image_sha256": o.digest(image), "helper_sha256": o.digest(out / "onn26-su"),
               "root_gzip": str(out / "system.root.raw.gz"),
@@ -249,6 +254,9 @@ def build(args):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--firmware-profile", default=o.PROFILE["id"],
+                   choices=(o.PROFILE["id"], *o.PROFILE.get("variants", {})),
+                   help="Exact device firmware profile; defaults to the supported US build")
     p.add_argument("--serial", required=True)
     p.add_argument("--slot", required=True, choices=("_a", "_b"),
                    help="The verified active slot from the selected device; no default")
