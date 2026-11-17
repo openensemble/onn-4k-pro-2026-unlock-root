@@ -174,6 +174,14 @@ Installation is asynchronous and stays disabled. Wait for it to finish, then
 run the read-only `dsu-status` command again if necessary. Continue only when it
 reports `installed_disabled_verified: true`.
 
+The result also includes `installation_status`, an explanation and a diagnostic
+folder. Failures, cancellation, progress older than ten minutes and missing
+completion evidence are reported separately. These states never authorize a
+boot. Keep the generated `dsu-status.json` and `*-installation-*.json` logs; see
+[diagnostic logging](../README.md#installation-status-and-diagnostic-logs).
+For abandoned setup, `python3 onn2026.py guide --restart-dsu` reviews removal and
+starts a fresh attempt while preserving the old receipts.
+
 ```sh
 onn26 boot-dsu --stage "$ONN26_STOCK_STAGE"
 ```

@@ -22,6 +22,7 @@ class Device:
         self.state = "installed\ndisabled"
         self.boot = BOOT
         self.log = ""
+        self.epoch = 2000
         self.calls = []
         self.fail_enable = False
 
@@ -39,6 +40,8 @@ class Device:
             return self.log
         if args[0] == "settings":
             return "1122334455667788"
+        if args == ("date", "+%s"):
+            return str(self.epoch)
         raise AssertionError((label, args))
 
     def shell(self, label, *args, **kwargs):

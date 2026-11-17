@@ -38,10 +38,18 @@ restore. The script stops for inspection and retains the current console.
 ## Abandoning temporary-system setup before a firmware write
 
 Use `python3 onn2026.py guide --restart-dsu`, or choose **R** when reopening
-unfinished guide progress. The guide can also offer this recovery when it finds
-an existing temporary installation, an incomplete upload, or an unconfirmed
-temporary staging/boot action. Removal always needs explicit confirmation after
-the current device and files have been inspected.
+unfinished guide progress or at either temporary-image waiting screen. The guide
+can also offer this recovery when it finds an existing temporary installation,
+an incomplete upload, or an unconfirmed temporary staging/boot action. Removal
+always needs explicit confirmation after the current device and files have been
+inspected.
+
+A stuck waiting screen can be left with **q** or **Ctrl-C** so the same checkout
+can be updated. Keep the onn powered on and keep `work/`; leaving the guide does
+not stop Android's asynchronous installer. The confirmed restart stops it before
+cleanup. Capture the displayed error and the printed diagnostic folder first.
+The new attempt preserves all earlier status reports and Android logs. See
+[the diagnostic file list](../README.md#installation-status-and-diagnostic-logs).
 
 Requirements are the same supported serial, firmware, bootloader and active slot,
 a completed unlocked boot into original Android, and DSU state `normal` or

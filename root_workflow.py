@@ -14,6 +14,7 @@ import urllib.request
 import uuid
 
 import onn2026 as o
+import dsu_diagnostics
 import dsu_recovery
 import host_build
 from guide_core import MAGISK_OPEN, ROOT_ACCESS_HELP, RootAccessUnavailable, TemporarySystemPresent
@@ -266,12 +267,17 @@ def stage_dsu(device, args):
               "Uploaded DSU archive changed")
     device.identify(unlocked=True)
     o.require(device.boot_id() == boot, "Boot changed before DSU install")
+    request["device_epoch"] = int(device.text("staging-clock", "date", "+%s"))
     o.save(device.s.path / "stage.json", request, exclusive=True)
-    device.shell("stage-disabled-dsu", "am", "start-activity", "-n", "com.android.dynsystem/.VerificationActivity",
+    launch = device.shell("stage-disabled-dsu", "am", "start-activity", "-n", "com.android.dynsystem/.VerificationActivity",
                  "-a", "android.os.image.action.START_INSTALL", "-d", "file://" + remote,
                  "--el", "KEY_SYSTEM_SIZE", str(build["system_bytes"]),
                  "--el", "KEY_USERDATA_SIZE", "4294967296", "--ez", "KEY_ENABLE_WHEN_COMPLETED", "false",
                  "--ez", "KEY_ONE_SHOT", "true", "--es", "KEY_DSU_SLOT", "dsu", timeout=20)
+    output = launch.get("stdout", "") + "\n" + launch.get("stderr", "")
+    o.require(not re.search(r"(?m)^\s*(?:Error(?: type \d+)?[: ]|Exception)", output),
+              "Android could not start the temporary-system installer.\n" + dsu_diagnostics.readable(output) +
+              "\nDiagnostics: " + str(device.s.path) + "\n" + dsu_recovery.HINT)
     return {"stage": str(device.s.path / "stage.json"), "enable_requested": False,
             "next": "Run dsu-status with this stage receipt; installation is asynchronous."}
 
@@ -280,17 +286,32 @@ def dsu_status(device, args):
     stage = read(args.stage)
     bound(device, stage)
     dsu_recovery.check_stage(device, stage)
-    current = state(device)
-    log = device.text("installation-log", "logcat", "-d", "-v", "brief", "-s",
+    before = device.boot_id()
+    log = device.text("installation-log", "logcat", "-d", "-v", "epoch", "-s",
                       "DynamicSystemInstallationService", "InstallationAsyncTask", "gsid", "DynamicSystemService",
+                      "VerificationActivity", "DynamicSystemVerificationActivity",
                       timeout=20)
-    tail = log.rsplit(stage["remote"].rsplit("/", 1)[1], 1)
-    ready = (current == "installed\ndisabled" and len(tail) == 2 and
-             re.search(r"status: READY, cause: INSTALL_COMPLETED\b", tail[-1]) is not None)
-    result = {"at": o.now(), "binding": device.binding, "boot_id": device.boot_id(), "state": current,
-              "stage_sha256": o.digest(args.stage), "installed_disabled_verified": ready}
-    if ready:
-        o.require(result["boot_id"] == stage["boot_id"], "Boot changed since staging")
+    clock = int(device.text("installation-clock", "date", "+%s"))
+    current = state(device)
+    bound(device, stage)
+    after = device.boot_id()
+    report = dsu_diagnostics.installation(log, stage["remote"], current,
+                                         before == after == stage["boot_id"], clock, stage.get("device_epoch"))
+    result = {"at": o.now(), "binding": device.binding, "boot_id": after, "state": current,
+              "stage": str(args.stage.resolve()), "stage_sha256": o.digest(args.stage),
+              "device_epoch": clock, "diagnostics": str(device.s.path), **report,
+              "installed_disabled_verified": report["installation_status"] == "ready"}
+    o.save(device.s.path / "dsu-status.json", result)
+    if report["installation_status"] in ("failed", "cancelled", "stalled", "unverified"):
+        # These supporting reads must not hide the installation diagnosis if
+        # Android rejects one or the connection is lost. Session keeps raw output.
+        result["diagnostic_checks"] = {}
+        for label, command in (("installation-storage", ("df", "-k", "/data")),
+                               ("installation-service", ("dumpsys", "activity", "services", "com.android.dynsystem"))):
+            response = device.shell(label, *command, timeout=10, check=False)
+            result["diagnostic_checks"][label] = {key: response.get(key) for key in ("returncode", "timed_out")}
+        o.save(device.s.path / "dsu-status.json", result)
+    if result["installed_disabled_verified"]:
         o.save(args.stage.parent / "installed.json", result)
     return result
 

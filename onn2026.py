@@ -13,12 +13,14 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 import urllib.request
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from connection_identity import FIELDS, SERIAL_PATTERN
 from guide_core import Stop, require, now
+import diagnostics
 
 ROOT = Path(__file__).resolve().parent
 PROFILE = json.loads((ROOT / "profile.json").read_text())
@@ -203,7 +205,9 @@ class Session:
 
     def run(self, label, argv, timeout=15, check=True, start_new_session=False):
         self.counter += 1
-        record = {"at": now(), "argv": [str(x) for x in argv], "timed_out": False}
+        started = time.monotonic()
+        record = {"at": now(), "label": label, "argv": [str(x) for x in argv], "timed_out": False,
+                  "timeout_seconds": timeout}
         try:
             p = subprocess.run(record["argv"], capture_output=True, text=True,
                                errors="replace", timeout=timeout, check=False,
@@ -215,10 +219,15 @@ class Session:
                           stdout=decode(error.stdout), stderr=decode(error.stderr))
         except OSError as error:
             record.update(returncode=None, stdout="", stderr=str(error))
-        save(self.path / f"{self.counter:03d}-{label}.json", record)
-        if check:
-            require(record["returncode"] == 0 and not record["timed_out"],
-                    f"{label} failed or timed out. No retry. Receipts: {self.path}")
+        record["duration_seconds"] = round(time.monotonic() - started, 3)
+        receipt = self.path / f"{self.counter:03d}-{label}.json"
+        save(receipt, record)
+        if check and (record["returncode"] != 0 or record["timed_out"]):
+            outcome = (f"timed out after {timeout} seconds" if record["timed_out"] else
+                       "could not start" if record["returncode"] is None else f"exited with code {record['returncode']}")
+            details = "".join("\n" + stream + ": " + diagnostics.readable(record[stream].strip())
+                              for stream in ("stderr", "stdout") if record[stream].strip())
+            raise Stop(f"{label} failed: {outcome}.{details}\nNo automatic retry. Command log: {receipt}")
         return record
 
 
@@ -615,9 +624,12 @@ def main(argv=None):
         print(json.dumps(result, indent=2))
         print("Receipts:", session.path)
         return 0
-    except (Stop, OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError) as error:
-        save(session.path / "stopped.json", {"at": now(), "reason": str(error), "automatic_retry": False})
-        print("STOP:", error, "\nReceipts:", session.path, file=sys.stderr)
+    except Exception as error:
+        try:
+            save(session.path / "stopped.json", diagnostics.failure(error, ROOT, at=now(), command=args.command))
+        except OSError as log_error:
+            print("Could not save the error report:", diagnostics.readable(str(log_error)), file=sys.stderr)
+        print("STOP:", diagnostics.readable(str(error), 3000), "\nReceipts:", session.path, file=sys.stderr)
         return 2
 
 

@@ -350,6 +350,27 @@ class Guide:
                 message = (str(error) + "\n\nAfter checking Shell's permission, press Enter to retry verification.\n"
                            "This repeats only the root check. You can also type q and resume later.")
 
+    def wait_for_dsu(self, result):
+        message = result.get("message", "Temporary Android installation completion could not be verified.")
+        event = result.get("last_event") or {}
+        if event.get("detail"):
+            message += "\nAndroid detail: " + event["detail"]
+        if result.get("state"):
+            message += "\nTemporary-system state: " + result["state"].replace("\n", ", ")
+        if result.get("diagnostics"):
+            message += "\nDiagnostics saved in: " + result["diagnostics"]
+        message += ("\n\nPress Enter to check again without repeating installation.\n"
+                    "R reviews removal of the temporary system and starts its setup again.\n"
+                    "This keeps earlier logs and backups; removal requires confirmation.\n"
+                    "You can also quit and run: python3 onn2026.py guide --restart-dsu")
+        while True:
+            self.ui.page(self.ui.title, message)
+            choice = self.ui.ask("Enter to check again, R to review removal and restart, or q to leave: ").lower()
+            if choice == "":
+                return
+            if choice == "r":
+                raise TemporarySystemPresent("Temporary-system restart requested. Previous diagnostics and backups are saved.")
+
     def run(self):
         support_notice = slot_notice(self.state["binding"])
         self.ui.device_label = (self.state["name"] + " | serial " + self.state["binding"]["ro.serialno"] +
@@ -427,8 +448,7 @@ class Guide:
                 result = self.act(lambda r: kind + "_boot" if r["installed_disabled_verified"] else phase,
                                   stage=results[kind + "_stage"]["stage"])
                 if not result["installed_disabled_verified"]:
-                    self.ui.wait("It is still installing. Keep the onn on and wait for installation to finish.\n"
-                                 "Press Enter to check again. This does not restart installation.")
+                    self.wait_for_dsu(result)
             elif phase in ("stock_boot", "root_boot"):
                 kind = "stock" if phase == "stock_boot" else "root"
                 if kind == "stock":

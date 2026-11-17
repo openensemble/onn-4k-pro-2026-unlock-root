@@ -399,6 +399,55 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.count("stock_stage"), 1)
         self.assertEqual(self.backend.count("stock_boot"), 1)
 
+    def test_dsu_wait_reports_errors_and_diagnostics_on_both_images_without_advancing(self):
+        self.guide.run()
+        for phase in ("stock_wait", "root_wait"):
+            for status in ("failed", "cancelled", "stalled", "unverified", "installing"):
+                with self.subTest(phase=phase, status=status):
+                    self.state["phase"] = phase
+                    self.backend.calls.clear()
+                    self.messages.clear()
+                    self.backend.answers[phase] = {"installed_disabled_verified": False,
+                                                  "installation_status": status, "message": "Diagnostic: " + status,
+                                                  "state": "normal", "diagnostics": "/example/saved-diagnostics",
+                                                  "last_event": {"detail": "Specific Android information"}}
+                    self.ui.read = lambda prompt: "q"
+                    with self.assertRaises(g.Paused):
+                        self.guide.run()
+                    self.assertEqual(self.state["phase"], phase)
+                    self.assertIsNone(self.state["pending"])
+                    self.assertEqual([name for name, _ in self.backend.calls], [phase])
+                    messages = "\n".join(self.messages)
+                    for expected in ("Diagnostic: " + status, "Specific Android information", "/example/saved-diagnostics",
+                                     "R reviews removal", "--restart-dsu", "requires confirmation"):
+                        self.assertIn(expected, messages)
+                    self.assertNotIn("It is still installing", messages)
+
+    def test_r_at_either_dsu_wait_requests_recovery_without_repeating_an_operation(self):
+        self.guide.run()
+        for phase in ("stock_wait", "root_wait"):
+            with self.subTest(phase=phase):
+                self.state["phase"] = phase
+                self.backend.calls.clear()
+                self.backend.answers[phase] = {"installed_disabled_verified": False, "installation_status": "unverified"}
+                self.ui.read = lambda prompt: "R"
+                with self.assertRaises(g.TemporarySystemPresent):
+                    self.guide.run()
+                self.assertEqual(self.state["phase"], phase)
+                self.assertIsNone(self.state["pending"])
+                self.assertEqual([name for name, _ in self.backend.calls], [phase])
+
+    def test_invalid_dsu_choice_does_not_repeat_the_status_check(self):
+        self.guide.run()
+        self.state["phase"] = "stock_wait"
+        self.backend.calls.clear()
+        self.backend.answers["stock_wait"] = {"installed_disabled_verified": False}
+        choices = iter(("invalid", "q"))
+        self.ui.read = lambda prompt: next(choices)
+        with self.assertRaises(g.Paused):
+            self.guide.run()
+        self.assertEqual(self.backend.count("stock_wait"), 1)
+
     def test_refusing_final_installation_never_flashes(self):
         self.ui.choose = lambda: self.state["phase"] != "flash_consent"
         with self.assertRaises(g.Paused):
@@ -549,6 +598,26 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(self.backend.calls, before)
         path = self.work / "devices" / hashlib.sha256(BINDING["ro.serialno"].encode()).hexdigest() / "guide.json"
         self.assertEqual(json.loads(path.read_text())["phase"], "complete")
+
+    def test_guide_failure_saves_phase_pending_receipt_and_traceback(self):
+        args = o.parser().parse_args(["--work", str(self.work), "--connection", str(self.connection_file), "guide"])
+        self.backend.failures["stock_stage"] = RuntimeError("simulated unexpected installation error")
+        with patch.object(g.sys.stdin, "isatty", return_value=True), patch.object(o, "verify_files"), \
+             patch.object(o, "ROOT", self.work), patch.object(g.shutil, "which", return_value="/fixture/adb"), \
+             patch.object(g, "Backend", return_value=self.backend):
+            self.assertEqual(g.start(args, self.ui), 2)
+        paths = list(self.work.glob("*-guide-error-*/error.json"))
+        self.assertEqual(len(paths), 1)
+        report = json.loads(paths[0].read_text())
+        self.assertEqual(report["phase"], "stock_stage")
+        self.assertEqual(report["pending"]["phase"], "stock_stage")
+        self.assertEqual(report["error_type"], "RuntimeError")
+        self.assertIn("simulated unexpected installation error", report["traceback"])
+        self.assertFalse(report["automatic_retry"])
+        self.assertTrue(Path(report["saved_progress"]).is_file())
+        self.assertIn(str(paths[0]), "\n".join(self.messages))
+        self.assertEqual(self.backend.count("stock_stage"), 1)
+        self.assertEqual(self.backend.count("stock_boot"), 0)
 
     def test_household_menu_selects_the_named_unit_without_contacting_others(self):
         for name, serial in (("Living room", BINDING["ro.serialno"]), ("Bedroom", "JUSABEDROOM")):

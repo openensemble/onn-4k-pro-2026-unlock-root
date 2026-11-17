@@ -163,7 +163,8 @@ successful result when reopened; that is not a fresh live device check.
 
 If an upload or temporary-system installation was interrupted, the guide offers
 **Remove temporary system and start again**. You can also choose **R** when
-reopening unfinished setup, or request that option directly:
+reopening unfinished setup or at either temporary-image waiting screen, or
+request that option directly:
 
 ```sh
 python3 onn2026.py guide --restart-dsu
@@ -187,6 +188,43 @@ It does not bypass firmware or stock-image checks. If cleanup loses its connecti
 rerun the guide to inspect the current state and explicitly confirm recovery again.
 See [recovery and failure handling](docs/RECOVERY.md) before changing a device
 whose firmware write or reboot is uncertain.
+
+### Installation status and diagnostic logs
+
+The temporary-image check distinguishes recent installation progress, failure,
+cancellation, possible stalled progress, and unverified completion. It shows the
+Android error or partition progress when available. Progress messages older than
+ten minutes are reported as possibly stalled. Missing or rotated logs are not
+treated as proof that an installation is still running or ready to boot.
+
+At either waiting screen, **Enter** only checks again, **R** opens the existing
+removal/restart confirmation, and **q** leaves the guide. An already stuck guide
+can be exited at its prompt with **q** or **Ctrl-C**. Keep the onn powered on;
+exiting the guide does not cancel Android's background installation. Update the
+same checkout, preserve `work/`, then run `python3 onn2026.py guide --restart-dsu`
+and review the cleanup prompt. The restart stops the background installer before
+removing the temporary system and preparing a fresh attempt.
+
+When a check needs attention, it prints its diagnostic folder under `work/`.
+For an installation problem, include these files when reporting it:
+
+- `dsu-status.json`: the interpreted status, last Android status/cause, message
+  age, DSU state and the stage receipt it checked.
+- `*-installation-log.json`: the full filtered Android log.
+- `*-installation-storage.json` and `*-installation-service.json`: free storage
+  and installer-service state collected for abnormal or unverified results.
+
+Command failures show the failing step, exit code or timeout, relevant output
+and the exact command-log path. The full output and timing are saved, including
+partial output from timeouts. If an error stops the guide, it also prints a
+`work/*-guide-error-*/error.json` report containing the current step, pending
+operation receipt, exception traceback and script-package fingerprint. Manual
+commands save the corresponding report as `stopped.json` in their session folder.
+
+Post the displayed error and the relevant diagnostic files with your issue.
+Review them before posting: logs can contain device serials, network addresses
+and local paths. Do not upload the entire `work/` folder, firmware images, backups
+or private ADB keys. Diagnostics remain local until you choose to share them.
 
 ### The two temporary boots
 

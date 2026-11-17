@@ -64,6 +64,8 @@ class Android:
             return hashlib.sha256(self.files[args[1]]).hexdigest() + "  " + args[1]
         if args[0] == "logcat":
             return self.log
+        if args == ("date", "+%s"):
+            return "2000"
         raise AssertionError((label, args))
 
     def shell(self, label, *args, **kwargs):
@@ -91,7 +93,8 @@ class Android:
             self.writes.append(label)
             self.state = "installed\ndisabled"
             name = args[args.index("-d") + 1].rsplit("/", 1)[1]
-            self.log = name + "\nstatus: READY, cause: INSTALL_COMPLETED"
+            self.log = ("2000.000 10 10 D InstallationAsyncTask: Start doInBackground(), URL: file:///Download/" + name +
+                        "\n2000.100 10 10 D DynamicSystemInstallationService: status: READY, cause: INSTALL_COMPLETED")
         elif label == "enable-single-use-dsu":
             self.writes.append(label)
             self.state = "installed\nenabled"
@@ -448,6 +451,62 @@ class RestartTests(unittest.TestCase):
             self.assertEqual(g.start(args, self.ui), 0)
         run.assert_called_once()
         self.assertEqual(recovery.read(self.path)["phase"], "consent")
+
+    def restart_from_wait(self, phase, accept):
+        kind = phase.removesuffix("_wait")
+        stage = self.work / "stage.json"
+        o.save(stage, {"binding": self.device.binding, "kind": kind, "boot_id": self.device.boot_id(),
+                       "remote": ARCHIVE, "android_id": self.device.android_id})
+        self.state.update(phase=phase, pending=None, results={kind + "_stage": {"stage": str(stage)}})
+        o.save(self.path, self.state)
+        old_attempt = self.attempt.read_bytes()
+        self.device.log = ARCHIVE + "\n2000.000 10 10 D DynamicSystemInstallationService: status: NOT_STARTED, cause: ERROR_IO"
+        self.device.state = "normal"
+        self.ui.read = lambda prompt: "r" if "Enter to check again" in prompt else ""
+        self.ui.choose = lambda: accept
+        args = o.parser().parse_args(["--work", str(self.work), "--connection", str(self.connection), "guide"])
+        original_run = g.Guide.run
+        entered = []
+        def run(guide):
+            entered.append(guide.state["phase"])
+            if guide.state["phase"] == "consent":
+                raise g.Paused()
+            return original_run(guide)
+        def invoke(step, context, values):
+            self.assertEqual(step, phase)
+            return flow.dsu_status(self.device, SimpleNamespace(stage=Path(values["stage"])))
+        shell = self.device.shell
+        def support_reads(label, *commands, **kwargs):
+            if label in ("installation-storage", "installation-service"):
+                return {"returncode": 0, "timed_out": False, "stdout": "fixture diagnostics"}
+            return shell(label, *commands, **kwargs)
+        with patch.object(g.sys.stdin, "isatty", return_value=True), patch.object(o, "verify_files"), \
+             patch.object(o, "ROOT", self.work), patch.object(g.shutil, "which", return_value="fake-adb"), \
+             patch.object(g, "Backend", return_value=self.device), patch.object(g.Guide, "run", new=run), \
+             patch.object(self.device, "invoke", create=True, side_effect=invoke), \
+             patch.object(self.device, "shell", side_effect=support_reads):
+            self.assertEqual(g.start(args, self.ui), 0)
+        self.assertEqual(self.attempt.read_bytes(), old_attempt)
+        self.assertTrue(list(self.work.glob("*/dsu-status.json")))
+        self.assertEqual(entered, [phase, "consent"] if accept else [phase])
+        self.assertEqual(recovery.read(self.path)["phase"], "consent" if accept else phase)
+        if accept:
+            self.assertEqual(self.device.writes, ["stop-dsu-installer", "remove-abandoned-dsu", "remove-abandoned-upload"])
+            archives = list((self.base / "dsu-restarts").glob("*/previous-guide.json"))
+            self.assertEqual(len(archives), 1)
+            self.assertEqual(recovery.read(archives[0])["results"][phase]["installation_status"], "failed")
+        else:
+            self.assertEqual(self.device.writes, [])
+            self.assertIn(ARCHIVE, self.device.files)
+
+    def test_stock_wait_r_reaches_existing_guarded_restart(self):
+        self.restart_from_wait("stock_wait", True)
+
+    def test_root_wait_r_reaches_existing_guarded_restart(self):
+        self.restart_from_wait("root_wait", True)
+
+    def test_declining_restart_from_wait_keeps_installation_and_diagnostics(self):
+        self.restart_from_wait("stock_wait", False)
 
     def test_pending_restart_is_offered_before_old_guide_can_run(self):
         def fail(label):

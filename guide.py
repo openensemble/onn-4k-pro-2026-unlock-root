@@ -13,6 +13,7 @@ import sys
 from types import SimpleNamespace
 
 import connection
+import diagnostics
 import dsu_recovery
 import onn2026 as o
 import root_workflow as flow
@@ -245,7 +246,7 @@ def start(args, ui=None):
     if args.preview:
         ui.say(PREVIEW + "\n" + RISK_TEXT + "\n\nPreview only. No device was contacted or changed.")
         return 0
-    path = None
+    path, state = None, None
     try:
         o.require(sys.stdin.isatty(), "Open a terminal to use the interactive guide. Use guide --preview for an offline overview.")
         o.verify_files()
@@ -306,8 +307,20 @@ def start(args, ui=None):
         if path:
             ui.say("Saved progress: " + str(path))
         return 0
-    except (o.Stop, OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError) as error:
-        ui.page("Stopped before the next step", "No failed action will be automatically repeated.\n" + str(error))
+    except Exception as error:
+        failed_screen = ui.title
+        ui.page("Stopped before the next step", "No failed action will be automatically repeated.\n" +
+                diagnostics.readable(str(error), 3000))
+        try:
+            report = o.Session(args.work, "guide-error").path / "error.json"
+            o.save(report, diagnostics.failure(error, o.ROOT, at=o.now(), command="guide",
+                                               screen=failed_screen,
+                                               phase=state.get("phase") if state else None,
+                                               pending=state.get("pending") if state else None,
+                                               saved_progress=str(path) if path else None))
+            ui.say("Diagnostic report: " + str(report))
+        except OSError as log_error:
+            ui.say("Could not save the diagnostic report: " + diagnostics.readable(str(log_error)))
         if path:
             ui.say("Keep your saved progress and receipts: " + str(path))
         return 2

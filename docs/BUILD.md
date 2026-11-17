@@ -548,3 +548,47 @@ receipts remain in ignored `work/row-dsu-review-20261115/`.
 No live device was contacted, flashed or rebooted during this review. Canadian
 hardware evidence remains the contributor's slot-A report. No commit, push or
 website publication was performed.
+
+## DSU status, recovery and diagnostics — November 17, 2026
+
+[Issue #6](https://github.com/openensemble/onn-4k-pro-2026-unlock-root/issues/6)
+reported two days at the first installation check. The old guide described every
+unverified completion as still installing, including failures and missing logs.
+Offline reproduction confirmed that reporting bug; the reporter's underlying
+device failure remains unknown until diagnostic evidence is supplied.
+
+The status reader now interprets Android's latest matching status/cause, reports
+partition progress and its age, and distinguishes failure, cancellation,
+possible stalls and unverified completion. Progress ten minutes old is marked
+possibly stalled. New stage receipts record Android's own clock so earlier
+completion messages cannot verify a new attempt. Existing stage receipts remain
+readable. Completion still requires the matching archive, installed/disabled
+state and unchanged boot; a changed boot during collection cannot save success.
+The message format follows Android 14's
+[installation service](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-14.0.0_r1/packages/DynamicSystemInstallationService/src/com/android/dynsystem/DynamicSystemInstallationService.java).
+
+Both waiting screens offer **R** through the existing guarded cleanup/restart
+transaction. Enter repeats only the status check. Declining cleanup preserves
+the device and guide; accepting preserves earlier attempts, logs and backups and
+starts a new DSU cycle. The firmware-write and uncertain-reboot guards remain.
+
+Each check saves `dsu-status.json` alongside its timestamped Android log. Abnormal
+results also collect storage and installer-service diagnostics without letting
+an unsuccessful supporting command replace the primary diagnosis. Command errors
+show exit/timeout details and output; raw output, partial timeout output and
+timings remain in session logs. Stopped guides and manual commands save error
+reports with traceback, phase/receipt context where available, host information
+and package-manifest hash. Activity-launch errors are caught even when ADB exits
+zero. Diagnostics stay local and the README identifies which files to share.
+
+Validation: **284 Python tests passed**, including the existing flash-template,
+US/Canadian, interruption and recovery suites; **11 native protocol scenarios**
+passed. All **49 packaged input hashes**, packaged Python syntax and Git whitespace
+checks passed. New cases cover failure and cancellation after earlier success,
+missing/wrong-image/old logs, fresh and two-day-old progress, changed boots,
+both waiting-screen restart routes, declined cleanup, failed supporting reads,
+zero-exit activity errors, full/partial command output and unexpected exceptions.
+
+The full suite log is retained locally in ignored
+`work/issue6-tests-20261117.log`. No physical device was contacted or changed;
+this validation does not establish the cause of the reporter's installation issue.
